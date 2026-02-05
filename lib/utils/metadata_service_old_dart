@@ -1,64 +1,73 @@
 import 'dart:io';
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'dart:typed_data';
 import 'package:image/image.dart' as img;
-import 'package:sv_timestamp/utils/emoji_manager.dart';
-import '../models/watermark_template.dart';
-import '../screens/template_editor_screen.dart';
-import '../screens/template_gallery_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sv_timestamp/l10n/app_localizations.dart';
 
 class MetadataService {
-  static WatermarkTemplate? _selectedTemplate;
   static Map<String, img.Image> _emojiCache = {};
 
-  // Set the selected template
-  static void setSelectedTemplate(WatermarkTemplate? template) {
-    _selectedTemplate = template;
+  static String? _customLogoPath;
+  static String? _customLogoBase64;
+  static String _appTitle = '';
+
+  // static int fontSize = 20;
+
+  static double? _watermarkSize;
+
+  // static double? get watermarkSize => _watermarkSize;
+  static String get appTitle => _appTitle;
+
+  static Future<void> initializeSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    _appTitle = prefs.getString('app_title') ?? '';
+    _customLogoPath = prefs.getString('custom_logo_path');
+
+    _watermarkSize = prefs.getDouble('watermark_size');
+
+    print("_watermarkSize: $_watermarkSize");
+
+    // If custom logo path exists, load it
+    if (_customLogoPath != null && File(_customLogoPath!).existsSync()) {
+      try {
+        final bytes = await File(_customLogoPath!).readAsBytes();
+        _customLogoBase64 = String.fromCharCodes(bytes);
+      } catch (e) {
+        print('Error loading custom logo: $e');
+        _customLogoPath = null;
+      }
+    }
   }
 
-  // Get the current selected template
-  static WatermarkTemplate? getSelectedTemplate() {
-    return _selectedTemplate;
+  static Future<void> setCustomLogoPath(String? path) async {
+    _customLogoPath = path;
+    _customLogoBase64 = null;
+
+    if (path != null) {
+      try {
+        final bytes = await File(path).readAsBytes();
+        _customLogoBase64 = String.fromCharCodes(bytes);
+      } catch (e) {
+        print('Error loading new custom logo: $e');
+      }
+    }
+
+    // Save to SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    if (path != null) {
+      await prefs.setString('custom_logo_path', path);
+    } else {
+      await prefs.remove('custom_logo_path');
+    }
   }
 
-  // Navigate to template gallery
-  static void navigateToTemplateGallery(
-    BuildContext context, {
-    bool forSelection = false,
-  }) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => TemplateGalleryScreen(
-          onTemplateSelected: forSelection
-              ? (template) {
-                  setSelectedTemplate(template);
-                  Navigator.pop(context);
-                }
-              : null,
-        ),
-      ),
-    );
-  }
-
-  // Navigate to template editor
-  static void navigateToTemplateEditor(
-    BuildContext context, {
-    WatermarkTemplate? template,
-  }) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => TemplateEditorScreen(
-          template: template,
-          isCreatingNew: template == null,
-        ),
-      ),
-    );
+  static void setAppTitle(String title) {
+    _appTitle = title.isNotEmpty ? title : '';
   }
 
   // Get GPS Coordinates
@@ -86,8 +95,6 @@ class MetadataService {
     }
   }
 
-  // Convert GPS → Address
-  // Convert GPS → Address with better error handling
   static Future<String?> getAddressFromCoordinates(
     double lat,
     double lng,
@@ -131,330 +138,95 @@ class MetadataService {
     }
   }
 
-  // Load logo from assets and convert to img.Image
   static Future<img.Image?> loadLogoImage() async {
     try {
-      final ByteData data = await rootBundle.load('assets/logo.png');
-      final Uint8List bytes = data.buffer.asUint8List();
-      return img.decodeImage(bytes);
+      // Try to load custom logo first
+      if (_customLogoBase64 != null && _customLogoBase64!.isNotEmpty) {
+        try {
+          final bytes = Uint8List.fromList(_customLogoBase64!.codeUnits);
+          final image = img.decodeImage(bytes);
+          if (image != null) {
+            print('Loaded custom logo successfully');
+            return image;
+          }
+        } catch (e) {
+          print('Error decoding custom logo: $e');
+        }
+      }
+
+      // Fall back to default logo
+      try {
+        final ByteData data = await rootBundle.load('assets/logo.png');
+        final Uint8List bytes = data.buffer.asUint8List();
+        final image = img.decodeImage(bytes);
+        if (image != null) {
+          print('Loaded default logo from assets');
+          return image;
+        }
+      } catch (e) {
+        print('Error loading default logo: $e');
+      }
+
+      // Try to load from custom file path if base64 failed
+      if (_customLogoPath != null) {
+        try {
+          final bytes = await File(_customLogoPath!).readAsBytes();
+          final image = img.decodeImage(bytes);
+          if (image != null) {
+            print('Loaded custom logo from file path');
+            return image;
+          }
+        } catch (e) {
+          print('Error loading logo from file: $e');
+        }
+      }
+
+      return null;
     } catch (e) {
-      print('Error loading logo: $e');
+      print('Error in loadLogoImage: $e');
       return null;
     }
   }
 
-  // Replace placeholders in template text
-  static String _replacePlaceholders(
-    String text,
-    Map<String, dynamic> metadata,
-  ) {
-    return text
-        .replaceAll('{time}', metadata['time']?.toString() ?? '')
-        .replaceAll('{date}', metadata['date']?.toString() ?? '')
-        .replaceAll('{timestamp}', metadata['timestamp']?.toString() ?? '')
-        .replaceAll('{location}', metadata['location']?.toString() ?? '')
-        .replaceAll('{address}', metadata['address']?.toString() ?? '')
-        .replaceAll('{lat}', metadata['latitude']?.toString() ?? '')
-        .replaceAll('{lng}', metadata['longitude']?.toString() ?? '')
-        .replaceAll('{latitude}', metadata['latitude']?.toString() ?? '')
-        .replaceAll('{longitude}', metadata['longitude']?.toString() ?? '')
-        .replaceAll('{device}', metadata['device']?.toString() ?? '');
+  // Clear custom logo cache
+  static void clearCustomLogo() {
+    _customLogoPath = null;
+    _customLogoBase64 = null;
+
+    // Clear from SharedPreferences
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.remove('custom_logo_path');
+    });
   }
 
-  // Draw text with background on image
-  static void _drawTextWithBackground(
-    img.Image image,
-    String text,
-    int x,
-    int y,
-    TextStyle style,
-    Color backgroundColor,
-    double opacity,
-    double scale,
-  ) {
-    // Split text into lines
-    final lines = text.split('\n');
-    final fontSize = (style.fontSize ?? 14) * scale;
-    final lineHeight = fontSize * 1.2;
-
-    for (int i = 0; i < lines.length; i++) {
-      final lineY = y + (i * lineHeight).toInt();
-      if (lineY < image.height) {
-        _drawText(
-          image,
-          lines[i],
-          x,
-          lineY,
-          fontSize.toInt(),
-          color: style.color ?? Colors.white,
-        );
-      }
-    }
+  // Check if custom logo is set
+  static bool hasCustomLogo() {
+    return _customLogoPath != null ||
+        (_customLogoBase64 != null && _customLogoBase64!.isNotEmpty);
   }
 
-  // Apply template to image (NEW METHOD)
-  static Future<Uint8List> applyTemplateToImage(
-    Uint8List originalImage,
-    WatermarkTemplate template,
-    Map<String, dynamic> metadata,
-  ) async {
-    img.Image? image = img.decodeImage(originalImage);
-    if (image == null) return originalImage;
-
-    // Apply semi-transparent overlay if background opacity > 0
-    if (template.backgroundOpacity > 0) {
-      final bgColor = template.backgroundColor;
-      final bgR = bgColor.red;
-      final bgG = bgColor.green;
-      final bgB = bgColor.blue;
-
-      for (int y = 0; y < image.height; y++) {
-        for (int x = 0; x < image.width; x++) {
-          final pixel = image.getPixel(x, y);
-          final r =
-              (pixel.r * (1 - template.backgroundOpacity) +
-                      bgR * template.backgroundOpacity)
-                  .toInt();
-          final g =
-              (pixel.g * (1 - template.backgroundOpacity) +
-                      bgG * template.backgroundOpacity)
-                  .toInt();
-          final b =
-              (pixel.b * (1 - template.backgroundOpacity) +
-                      bgB * template.backgroundOpacity)
-                  .toInt();
-          image.setPixelRgba(x, y, r, g, b, b);
-        }
-      }
-    }
-
-    // Apply each visible element from template
-    for (final element in template.elements) {
-      if (!element.isVisible) continue;
-
-      await _applyElementToImage(image, element, metadata);
-    }
-
-    return Uint8List.fromList(img.encodeJpg(image, quality: 95));
+  static String? getCustomLogoPath() {
+    return _customLogoPath;
   }
 
-  // Apply a single element to image
-  static Future<void> _applyElementToImage(
-    img.Image image,
-    WatermarkElement element,
-    Map<String, dynamic> metadata,
-  ) async {
-    // Calculate absolute position based on relative position
-    final x = (element.position.dx * image.width).toInt();
-    final y = (element.position.dy * image.height).toInt();
-
-    switch (element.type) {
-      case WatermarkElementType.logo:
-        if (element.imagePath != null) {
-          try {
-            final logo = await loadLogoImage();
-            if (logo != null) {
-              final scaledLogo = img.copyResize(
-                logo,
-                width: (60 * element.scale).toInt(),
-                height: (60 * element.scale).toInt(),
-              );
-              // Composite logo onto image
-              for (int logoY = 0; logoY < scaledLogo.height; logoY++) {
-                for (int logoX = 0; logoX < scaledLogo.width; logoX++) {
-                  final pixel = scaledLogo.getPixel(logoX, logoY);
-                  if (pixel.a > 128) {
-                    // Not fully transparent
-                    final targetX = x + logoX - (scaledLogo.width ~/ 2);
-                    final targetY = y + logoY - (scaledLogo.height ~/ 2);
-                    if (targetX >= 0 &&
-                        targetX < image.width &&
-                        targetY >= 0 &&
-                        targetY < image.height) {
-                      // Blend with opacity
-                      final bgPixel = image.getPixel(targetX, targetY);
-                      final opacity = pixel.a / 255.0 * element.opacity;
-                      final blendR =
-                          (pixel.r * opacity + bgPixel.r * (1 - opacity))
-                              .toInt();
-                      final blendG =
-                          (pixel.g * opacity + bgPixel.g * (1 - opacity))
-                              .toInt();
-                      final blendB =
-                          (pixel.b * opacity + bgPixel.b * (1 - opacity))
-                              .toInt();
-                      image.setPixelRgba(
-                        targetX,
-                        targetY,
-                        blendR,
-                        blendG,
-                        blendB,
-                        255,
-                      );
-                    }
-                  }
-                }
-              }
-            }
-          } catch (e) {
-            print('Error loading logo: $e');
-          }
-        }
-        break;
-
-      case WatermarkElementType.timestamp:
-      case WatermarkElementType.location:
-      case WatermarkElementType.address:
-      case WatermarkElementType.gpsCoordinates:
-      case WatermarkElementType.customText:
-      case WatermarkElementType.deviceInfo:
-        String text = element.text ?? '';
-        text = _replacePlaceholders(text, metadata);
-
-        // Draw text with background
-        if (text.isNotEmpty) {
-          _drawTextWithBackground(
-            image,
-            text,
-            x,
-            y,
-            element.style,
-            element.backgroundColor,
-            element.opacity,
-            element.scale,
-          );
-        }
-        break;
-
-      case WatermarkElementType.border:
-        _drawBorder(image, element);
-        break;
-
-      case WatermarkElementType.qrCode:
-        _drawQrCode(image, x, y, element);
-        break;
-    }
-  }
-
-  // Draw border element
-  static void _drawBorder(img.Image image, WatermarkElement element) {
-    final borderWidth = (2 * element.scale).toInt();
-    final color = element.backgroundColor;
-
-    // Draw top border
-    for (int y = 0; y < borderWidth; y++) {
-      for (int x = 0; x < image.width; x++) {
-        _blendPixel(image, x, y, color, element.opacity);
-      }
-    }
-
-    // Draw bottom border
-    for (int y = image.height - borderWidth; y < image.height; y++) {
-      for (int x = 0; x < image.width; x++) {
-        _blendPixel(image, x, y, color, element.opacity);
-      }
-    }
-
-    // Draw left border
-    for (int y = 0; y < image.height; y++) {
-      for (int x = 0; x < borderWidth; x++) {
-        _blendPixel(image, x, y, color, element.opacity);
-      }
-    }
-
-    // Draw right border
-    for (int y = 0; y < image.height; y++) {
-      for (int x = image.width - borderWidth; x < image.width; x++) {
-        _blendPixel(image, x, y, color, element.opacity);
-      }
-    }
-  }
-
-  // Draw QR code placeholder
-  static void _drawQrCode(
-    img.Image image,
-    int x,
-    int y,
-    WatermarkElement element,
-  ) {
-    final size = (80 * element.scale).toInt();
-    final halfSize = size ~/ 2;
-
-    // Draw QR code placeholder (squares)
-    for (int qrY = y - halfSize; qrY < y + halfSize; qrY++) {
-      for (int qrX = x - halfSize; qrX < x + halfSize; qrX++) {
-        if (qrX >= 0 && qrX < image.width && qrY >= 0 && qrY < image.height) {
-          final distX = (qrX - x).abs();
-          final distY = (qrY - y).abs();
-          if (distX < 2 ||
-              distY < 2 ||
-              (distX < halfSize - 2 && distY < halfSize - 2)) {
-            _blendPixel(image, qrX, qrY, Colors.black, element.opacity);
-          } else {
-            _blendPixel(image, qrX, qrY, Colors.white, element.opacity);
-          }
-        }
-      }
-    }
-  }
-
-  // Blend pixel with color and opacity
-  static void _blendPixel(
-    img.Image image,
-    int x,
-    int y,
-    Color color,
-    double opacity,
-  ) {
-    if (x >= 0 && x < image.width && y >= 0 && y < image.height) {
-      final pixel = image.getPixel(x, y);
-      final r = (pixel.r * (1 - opacity) + color.red * opacity).toInt();
-      final g = (pixel.g * (1 - opacity) + color.green * opacity).toInt();
-      final b = (pixel.b * (1 - opacity) + color.blue * opacity).toInt();
-      image.setPixelRgba(x, y, r, g, b, b);
-    }
-  }
-
-  // UPDATED: Main method to add metadata to image (now supports templates)
   static Future<Uint8List> addMetadataToImage(
     Uint8List originalImage,
     DateTime timestamp,
     Map<String, double>? location,
     String? address, {
-    WatermarkTemplate? customTemplate,
+    String? locationLabel,
+    String? addressLabel,
+    String? datetimeLabel,
   }) async {
-    // Use custom template if provided, otherwise use selected template
-    final template = customTemplate ?? _selectedTemplate;
-
-    print("template: $template");
-
-    if (template != null) {
-      // Prepare metadata for template
-      final metadata = {
-        'time':
-            '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}',
-        'date': '${timestamp.day}/${timestamp.month}/${timestamp.year}',
-        'timestamp': timestamp.toLocal().toString(),
-        'latitude': location?['latitude']?.toStringAsFixed(4),
-        'longitude': location?['longitude']?.toStringAsFixed(4),
-        'location': location != null
-            ? '${location['latitude']!.toStringAsFixed(4)}, ${location['longitude']!.toStringAsFixed(4)}'
-            : 'Location not available',
-        'address': address ?? null,
-        'device': 'Mobile Device',
-      };
-
-      // Apply template to image
-      return await applyTemplateToImage(originalImage, template, metadata);
-    } else {
-      // Fallback to original watermarking method
-      return await _legacyAddMetadataToImage(
-        originalImage,
-        timestamp,
-        location,
-        address,
-      );
-    }
+    return await _legacyAddMetadataToImage(
+      originalImage,
+      timestamp,
+      location,
+      address,
+      locationLabel: locationLabel,
+      addressLabel: addressLabel,
+      datetimeLabel: datetimeLabel,
+    );
   }
 
   // Initialize emoji cache (call this once at app startup)
@@ -490,8 +262,11 @@ class MetadataService {
     Uint8List originalImage,
     DateTime timestamp,
     Map<String, double>? location,
-    String? address,
-  ) async {
+    String? address, {
+    String? locationLabel,
+    String? addressLabel,
+    String? datetimeLabel,
+  }) async {
     img.Image? image = img.decodeImage(originalImage);
     if (image == null) return originalImage;
 
@@ -515,44 +290,58 @@ class MetadataService {
     ];
     final days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+    print(
+      "locationLabel: $locationLabel, addressLabel: $addressLabel, datetimeLabel: $datetimeLabel",
+    );
+
     final dateText =
         '${timestamp.day} ${months[timestamp.month - 1]} ${timestamp.year}, '
         '${days[timestamp.weekday - 1]}';
 
-    // ---- STYLES (BIG) ----
-    const int fontSize = 120; // ⬅ BIG TEXT
+    // ---- STYLES ----
+    final prefs = await SharedPreferences.getInstance();
+    final double fontSizeDouble = prefs.getDouble('watermark_size') ?? 25.0;
+    final int fontSize = fontSizeDouble.toInt();
     final int lineHeight = (fontSize * 1.4).toInt();
     const int leftMargin = 40;
     const int bottomPadding = 40;
 
-    // ---- LOGO (VERY BIG) ----
+    // ---- LOGO ----
     final logoImage = await loadLogoImage();
     final logo = logoImage != null
-        ? img.copyResize(logoImage, width: 1200) // ⬅ BIG LOGO
+        ? img.copyResize(logoImage, width: 250)
         : null;
+    final spacingAfterLogo = logo != null ? 40 : 0;
 
-    // ---- CALCULATE HEIGHT SAFELY ----
-    int textLines = 2; // title + datetime
-    if (address != null && address.isNotEmpty) textLines++;
-    if (location != null) textLines++;
+    // ---- ADDRESS WRAP ----
+    final wrappedAddressLines = address != null && address.isNotEmpty
+        ? _wrapText('$locationLabel $address', fontSize, image.width - 100)
+        : <String>[];
 
-    final int logoHeight = logo?.height ?? 0;
-    final int spacingAfterLogo = logo != null ? 40 : 0;
-    final int totalTextHeight = textLines * lineHeight;
-
-    final int totalWatermarkHeight =
-        logoHeight + spacingAfterLogo + totalTextHeight;
+    // ---- TOTAL LINES ----
+    final totalTextLines =
+        1 +
+        1 +
+        wrappedAddressLines.length +
+        (location != null ? 1 : 0); // title + datetime + address + latlng
+    final logoHeight = logo?.height ?? 0;
+    final totalWatermarkHeight =
+        logoHeight + spacingAfterLogo + totalTextLines * lineHeight;
 
     // ---- SAFE START Y ----
     int currentY = image.height - totalWatermarkHeight - bottomPadding;
-
-    if (currentY < 20) currentY = 20; // ⬅ clamp to top-safe area
+    if (currentY < 20) currentY = 20;
 
     // ---- DRAW LOGO ----
     if (logo != null) {
-      for (int y = 0; y < logo.height; y++) {
-        for (int x = 0; x < logo.width; x++) {
-          final p = logo.getPixel(x, y);
+      final maxLogoHeight = image.height - currentY - 20; // clamp
+      final logoToDraw = logo.height > maxLogoHeight
+          ? img.copyResize(logo, height: maxLogoHeight)
+          : logo;
+
+      for (int y = 0; y < logoToDraw.height; y++) {
+        for (int x = 0; x < logoToDraw.width; x++) {
+          final p = logoToDraw.getPixel(x, y);
           if (p.a == 0) continue;
 
           final tx = leftMargin + x;
@@ -574,32 +363,38 @@ class MetadataService {
           );
         }
       }
-      currentY += logo.height + spacingAfterLogo;
+      currentY += logoToDraw.height + spacingAfterLogo;
     }
 
-    // ---- TEXT BLOCK ----
-    _drawText(image, 'SV Timestamp', leftMargin, currentY, fontSize);
-    currentY += lineHeight;
+    // ---- DRAW TITLE ----
+    // _drawText(
+    //   image,
+    //   _appTitle,
+    //   leftMargin,
+    //   currentY,
+    //   fontSize + 2,
+    //   stroke: true,
+    //   bold: true,
+    // );
+    // currentY += lineHeight;
+
+    // ---- DRAW DATETIME ----
 
     final timeText =
-        'Datetime: ${hour12.toString().padLeft(2, '0')}:'
-        '${timestamp.minute.toString().padLeft(2, '0')} $amPm | $dateText';
-
+        '$datetimeLabel ${hour12.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')} $amPm | $dateText';
     _drawText(image, timeText, leftMargin, currentY, fontSize);
-    currentY += lineHeight;
 
-    if (address != null && address.isNotEmpty) {
-      _drawText(
-        image,
-        'Location: ${_truncateSingleLine(address, fontSize, image.width - 100)}',
-        leftMargin,
-        currentY,
-        fontSize,
-      );
+    currentY += lineHeight + 1;
+
+    // ---- DRAW ADDRESS (MULTI-LINE) ----
+    for (var line in wrappedAddressLines) {
+      if (currentY + lineHeight > image.height - 20) break; // prevent overflow
+      _drawText(image, line, leftMargin, currentY, fontSize);
       currentY += lineHeight;
     }
 
-    if (location != null) {
+    // ---- DRAW LAT/LONG ----
+    if (location != null && currentY + lineHeight <= image.height - 20) {
       final lat = location['latitude']!;
       final lng = location['longitude']!;
       final latH = lat >= 0 ? 'N' : 'S';
@@ -607,8 +402,7 @@ class MetadataService {
 
       _drawText(
         image,
-        'Lat/Long: ${lat.abs().toStringAsFixed(6)}°$latH, '
-        '${lng.abs().toStringAsFixed(6)}°$lngH',
+        'Lat/Long: ${lat.abs().toStringAsFixed(6)}°$latH, ${lng.abs().toStringAsFixed(6)}°$lngH',
         leftMargin,
         currentY,
         fontSize,
@@ -616,6 +410,45 @@ class MetadataService {
     }
 
     return Uint8List.fromList(img.encodeJpg(image, quality: 95));
+  }
+
+  /// Wraps text into multiple lines that fit within maxWidth
+  static List<String> _wrapText(String text, int fontSize, int maxWidth) {
+    final font = _getFontForSize(fontSize);
+    final words = text.split(' ');
+    final lines = <String>[];
+    String currentLine = '';
+
+    for (var word in words) {
+      final testLine = currentLine.isEmpty ? word : '$currentLine $word';
+      if (_measureTextWidth(testLine, font) <= maxWidth) {
+        currentLine = testLine;
+      } else {
+        if (currentLine.isNotEmpty) {
+          lines.add(currentLine);
+        }
+        currentLine = word;
+
+        // Word itself is longer than maxWidth, split forcibly
+        while (_measureTextWidth(currentLine, font) > maxWidth &&
+            currentLine.length > 1) {
+          int cutIndex =
+              (currentLine.length *
+                      maxWidth /
+                      _measureTextWidth(currentLine, font))
+                  .floor();
+          final part = currentLine.substring(0, cutIndex);
+          lines.add(part);
+          currentLine = currentLine.substring(cutIndex);
+        }
+      }
+    }
+
+    if (currentLine.isNotEmpty) {
+      lines.add(currentLine);
+    }
+
+    return lines;
   }
 
   static String _truncateSingleLine(String text, int fontSize, int maxWidth) {
@@ -652,21 +485,64 @@ class MetadataService {
     int y,
     int fontSize, {
     Color? color,
+    bool shadow = true,
+    bool stroke = false,
+    bool bold = false,
   }) {
     final font = _getFontForSize(fontSize);
 
-    img.drawString(
-      image,
-      text,
-      font: font,
-      x: x,
-      y: y,
-      color: img.ColorRgb8(
-        color?.red ?? 255,
-        color?.green ?? 255,
-        color?.blue ?? 255,
-      ),
+    final textColor = img.ColorRgb8(
+      color?.red ?? 255,
+      color?.green ?? 255,
+      color?.blue ?? 255,
     );
+
+    if (stroke) {
+      final strokeColor = img.ColorRgb8(0, 0, 0);
+      const strokeWidth = 1;
+
+      for (int dx = -strokeWidth; dx <= strokeWidth; dx++) {
+        for (int dy = -strokeWidth; dy <= strokeWidth; dy++) {
+          if (dx == 0 && dy == 0) continue;
+
+          img.drawString(
+            image,
+            text,
+            font: font,
+            x: x + dx,
+            y: y + dy,
+            color: strokeColor,
+          );
+        }
+      }
+    }
+
+    if (shadow) {
+      img.drawString(
+        image,
+        text,
+        font: font,
+        x: x + 1,
+        y: y + 1,
+        color: img.ColorRgb8(0, 0, 0),
+      );
+    }
+
+    if (bold) {
+      for (int i = 0; i < 2; i++) {
+        img.drawString(
+          image,
+          text,
+          font: font,
+          x: x + i,
+          y: y,
+          color: textColor,
+        );
+      }
+    } else {
+      // ---- NORMAL TEXT ----
+      img.drawString(image, text, font: font, x: x, y: y, color: textColor);
+    }
   }
 
   // Update the helper method to support larger font sizes

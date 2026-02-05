@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sv_timestamp/l10n/app_localizations.dart';
 import 'package:sv_timestamp/screens/SettingsScreen.dart';
 import 'package:sv_timestamp/screens/full_screen_image_viewer.dart';
+import 'package:sv_timestamp/utils/setting_provider.dart';
 import 'package:sv_timestamp/widgets/setting_item.dart';
 import 'package:vibration/vibration.dart';
 import 'package:sv_timestamp/models/captured_image.dart';
@@ -132,10 +133,12 @@ class CameraScreenState extends State<CameraScreen>
   Future<void> _initLocation() async {
     try {
       final loc = await MetadataService.getCurrentLocation();
+      final locale = context.read<SettingsProvider>().currentLocale;
       if (loc != null) {
         final addr = await MetadataService.getAddressFromCoordinates(
           loc['latitude']!,
           loc['longitude']!,
+          // locale,
         );
         if (mounted) {
           setState(() {

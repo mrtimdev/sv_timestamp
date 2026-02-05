@@ -16,7 +16,9 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await EmojiManager.init();
   await Hive.initFlutter();
-  await MetadataService.initializeSettings();
+  await MetadataService.initializeSettings(const Locale('km'));
+
+  await MetadataService.loadKhmerFont();
 
   runApp(const MyApp());
 }
@@ -33,9 +35,10 @@ class MyApp extends StatelessWidget {
       ],
       child: Consumer<SettingsProvider>(
         builder: (context, settingsProvider, _) {
+          final isKhmer = settingsProvider.currentLocale.languageCode == 'km';
           return MaterialApp(
-            title: 'SV TimeStamp',
-            theme: AppTheme.lightTheme,
+            title: 'SVS TimeStamp',
+            theme: ThemeData(fontFamily: isKhmer ? 'KantumruyPro' : null),
             darkTheme: AppTheme.darkTheme,
             locale: settingsProvider.currentLocale,
             supportedLocales: const [Locale('en', 'US'), Locale('km', 'KH')],
