@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
-import 'package:sv_timestamp/l10n/app_localizations.dart';
+import 'package:svs_timestamp/l10n/app_localizations.dart';
 
-import 'package:sv_timestamp/screens/camera_screen.dart';
-import 'package:sv_timestamp/theme/app_theme.dart';
-import 'package:sv_timestamp/utils/emoji_manager.dart';
-import 'package:sv_timestamp/utils/metadata_service.dart';
-import 'package:sv_timestamp/utils/setting_provider.dart';
-import 'package:sv_timestamp/utils/storage_service.dart';
-import 'package:sv_timestamp/utils/app_shortcuts.dart';
+import 'package:svs_timestamp/screens/camera_screen.dart';
+import 'package:svs_timestamp/theme/app_theme.dart';
+import 'package:svs_timestamp/utils/emoji_manager.dart';
+import 'package:svs_timestamp/utils/metadata_service.dart';
+import 'package:svs_timestamp/utils/setting_provider.dart';
+import 'package:svs_timestamp/utils/storage_service.dart';
+import 'package:svs_timestamp/utils/app_shortcuts.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

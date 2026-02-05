@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
-import 'package:sv_timestamp/utils/metadata_service.dart';
+import 'package:svs_timestamp/utils/metadata_service.dart';
 
 class SettingsProvider with ChangeNotifier {
   Locale _currentLocale = const Locale('km');

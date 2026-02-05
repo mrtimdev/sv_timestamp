@@ -7,7 +7,7 @@
         android:maxSdkVersion="28"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
     <application
-        android:label="SV Timestamp"
+        android:label="SV SUPER Timestamp"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
         <activity

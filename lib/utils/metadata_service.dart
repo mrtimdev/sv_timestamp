@@ -8,7 +8,7 @@ import 'package:geocoding/geocoding.dart';
 import 'dart:typed_data';
 import 'package:image/image.dart' as img;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:sv_timestamp/l10n/app_localizations.dart';
+import 'package:svs_timestamp/l10n/app_localizations.dart';
 
 class MetadataService {
   static Map<String, img.Image> _emojiCache = {};
@@ -186,8 +186,8 @@ class MetadataService {
 
       // Fall back to default logo
       try {
-        final ByteData data = await rootBundle.load('assets/sv_logo.png');
-        // final ByteData data = await rootBundle.load('assets/sv_super_logo.png');
+        // final ByteData data = await rootBundle.load('assets/sv_logo.png');
+        final ByteData data = await rootBundle.load('assets/sv_super_logo.png');
         final Uint8List bytes = data.buffer.asUint8List();
         final image = img.decodeImage(bytes);
         if (image != null) {
