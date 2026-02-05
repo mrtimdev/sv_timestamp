@@ -37,7 +37,7 @@ class MyApp extends StatelessWidget {
         builder: (context, settingsProvider, _) {
           final isKhmer = settingsProvider.currentLocale.languageCode == 'km';
           return MaterialApp(
-            title: 'SVS TimeStamp',
+            title: 'SV TimeStamp',
             theme: ThemeData(fontFamily: isKhmer ? 'KantumruyPro' : null),
             darkTheme: AppTheme.darkTheme,
             locale: settingsProvider.currentLocale,
