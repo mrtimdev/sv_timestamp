@@ -1,957 +1,1194 @@
+// lib/screens/camera_screen.dart
+
+import 'dart:async';
+import 'dart:math';
+import 'dart:io';
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:native_device_orientation/native_device_orientation.dart';
 import 'package:provider/provider.dart';
 import 'package:camera/camera.dart';
-import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
-import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:svs_timestamp/l10n/app_localizations.dart';
 import 'package:svs_timestamp/screens/SettingsScreen.dart';
-import 'package:svs_timestamp/screens/full_screen_image_viewer.dart';
-import 'package:svs_timestamp/utils/setting_provider.dart';
-import 'package:svs_timestamp/widgets/setting_item.dart';
+import 'package:svs_timestamp/screens/gallery_screen.dart';
 import 'package:vibration/vibration.dart';
 import 'package:svs_timestamp/models/captured_image.dart';
 import '../utils/metadata_service.dart';
 import '../utils/storage_service.dart';
-import '../widgets/image_card.dart';
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key});
 
   @override
-  State<CameraScreen> createState() => CameraScreenState();
+  State<CameraScreen> createState() => _CameraScreenState();
 }
 
-class CameraScreenState extends State<CameraScreen>
+class _CameraScreenState extends State<CameraScreen>
     with WidgetsBindingObserver, TickerProviderStateMixin {
-  SharedPreferences? _prefs;
-  CameraController? _controller;
+  // Core
   late StorageService _storageService;
-  late List<CameraDescription> _cameras;
-  String _currentAddress = "Loading...";
-  Map<String, double>? _currentCoords;
-  bool _showLocation = true;
-  bool _isCapturing = false;
+  CameraController? _controller;
+  List<CameraDescription> _cameras = [];
+  bool _isControllerInitialized = false;
+  bool _isInitializing = false;
+
+  // State
   bool _isCameraReady = false;
+  bool _isCapturing = false;
   bool _isLocationReady = false;
-  double _currentZoom = 1.0;
-  FlashMode _currentFlash = FlashMode.off;
-  int _currentCameraIndex = 0;
+  String _cameraError = '';
 
-  // New settings from SettingsScreen
-  bool _showGrid = false;
-  bool _soundOnCapture = true;
-  bool _vibrationOnCapture = true;
-  String _imageQuality = 'High';
-  String _watermarkPosition = 'Bottom Right';
-  double _watermarkOpacity = 0.8;
-  double _watermarkSize = 25.0;
-  bool _isFlashSupported = true;
-  bool _isZoomSupported = true;
-  double _minZoomLevel = 1.0;
-  double _maxZoomLevel = 10.0;
+  // Camera settings
+  int _cameraIndex = 0;
+  FlashMode _flashMode = FlashMode.auto;
+  double _zoom = 1.0;
+  double _minZoom = 1.0;
+  double _maxZoom = 10.0;
   bool _isZooming = false;
-  OverlayEntry? _zoomOverlay;
+  double _baseZoom = 1.0;
 
-  double _baseZoomLevel = 1.0;
-  double _scaleZoom = 1.0;
+  // Focus ring
+  bool _showFocusRing = false;
+  Offset _focusPosition = Offset.zero;
+  late AnimationController _focusAnimation;
+  Timer? _focusTimer;
 
-  // Animation controllers
-  late AnimationController _captureAnimationController;
-  late AnimationController _flashAnimationController;
-  late Animation<double> _captureAnimation;
+  // Location
+  Map<String, double>? _coords;
+  String _address = "Loading...";
+
+  // User settings
+  late SharedPreferences _prefs;
+  bool _soundOn = true;
+  bool _vibrateOn = true;
+  String _quality = 'High';
+  double _watermarkSize = 25.0;
+  bool _keepOriginal = true;
+
+  // Animation
+  late AnimationController _captureAnim;
+
+  // Zoom debounce
+  Timer? _zoomDebounceTimer;
+
+  // Rotation handling
+  bool _isDisposed = false;
+  bool _isNavigatingAway = false;
+
+  // Orientation
+  Orientation _currentOrientation = Orientation.portrait;
+
+  // Add a flag to track if camera is initializing
+  bool _isCameraInitializing = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // Initialize animation controllers
-    _captureAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 300),
-      vsync: this,
-    );
-
-    _flashAnimationController = AnimationController(
+    _captureAnim = AnimationController(
       duration: const Duration(milliseconds: 200),
       vsync: this,
     );
 
-    _captureAnimation = Tween<double>(begin: 1.0, end: 0.7).animate(
-      CurvedAnimation(
-        parent: _captureAnimationController,
-        curve: Curves.easeInOut,
-      ),
+    _focusAnimation = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
     );
 
-    _initApp();
+    _init();
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _storageService = Provider.of<StorageService>(context, listen: false);
+  Future<void> _init() async {
+    if (_isInitializing) return;
+    _isInitializing = true;
+
+    try {
+      await _loadPrefs();
+      await _initLocation();
+      await _initCamera();
+    } catch (e) {
+      print('Init error: $e');
+    } finally {
+      _isInitializing = false;
+    }
   }
 
-  Future<void> _initApp() async {
-    await _loadSettings();
-    await MetadataService.initEmojiCache();
-
-    await _initLocation();
-    await _initializeCamera();
-  }
-
-  // Add this method to load settings
-  Future<void> _loadSettings() async {
+  Future<void> _loadPrefs() async {
     _prefs = await SharedPreferences.getInstance();
+    if (_isDisposed) return;
 
-    // Load settings from SharedPreferences
     setState(() {
-      _soundOnCapture = _prefs?.getBool('sound_on_capture') ?? true;
-      _vibrationOnCapture = _prefs?.getBool('vibration_on_capture') ?? true;
-      _imageQuality = _prefs?.getString('image_quality') ?? 'High';
-      _watermarkPosition =
-          _prefs?.getString('watermark_position') ?? 'Bottom Right';
-      _watermarkOpacity = _prefs?.getDouble('watermark_opacity') ?? 0.8;
-      _watermarkSize = _prefs?.getDouble('watermark_size') ?? 25.0;
+      _soundOn = _prefs.getBool('sound_on_capture') ?? true;
+      _vibrateOn = _prefs.getBool('vibration_on_capture') ?? true;
+      _quality = _prefs.getString('image_quality') ?? 'High';
+      _watermarkSize = _prefs.getDouble('watermark_size') ?? 25.0;
+      _keepOriginal = _prefs.getBool('keep_original') ?? true;
 
-      // Load app title and custom logo
-      final customTitle = _prefs?.getString('app_title');
-      if (customTitle != null && customTitle.isNotEmpty) {
-        MetadataService.setAppTitle(customTitle);
-      }
+      final title = _prefs.getString('app_title');
+      if (title?.isNotEmpty == true) MetadataService.setAppTitle(title!);
 
-      final customLogoPath = _prefs?.getString('custom_logo_path');
-      if (customLogoPath != null) {
-        MetadataService.setCustomLogoPath(customLogoPath);
-      }
+      final logoPath = _prefs.getString('custom_logo_path');
+      if (logoPath != null) MetadataService.setCustomLogoPath(logoPath);
     });
   }
 
   Future<void> _initLocation() async {
     try {
       final loc = await MetadataService.getCurrentLocation();
-      final locale = context.read<SettingsProvider>().currentLocale;
-      if (loc != null) {
+      if (_isDisposed) return;
+
+      if (loc != null && mounted) {
         final addr = await MetadataService.getAddressFromCoordinates(
           loc['latitude']!,
           loc['longitude']!,
-          // locale,
         );
+        setState(() {
+          _coords = loc;
+          _address = addr ?? "Unknown";
+          _isLocationReady = true;
+        });
+      } else {
         if (mounted) {
           setState(() {
-            _currentCoords = loc;
-            _currentAddress = addr ?? "Unknown Location";
+            _address = "Location unavailable";
             _isLocationReady = true;
           });
         }
-      } else if (mounted) {
-        setState(() {
-          _currentAddress = "Location not available";
-          _isLocationReady = true;
-        });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _currentAddress = "Location error";
+          _address = "Location error";
           _isLocationReady = true;
         });
       }
     }
   }
 
-  Future<void> _initializeCamera() async {
+  Future<void> _initCamera() async {
+    if (_isDisposed || _isNavigatingAway || _isCameraInitializing) return;
+
+    _isCameraInitializing = true;
+
     try {
       _cameras = await availableCameras();
+
       if (_cameras.isEmpty) {
-        throw Exception('No cameras found');
+        if (mounted) {
+          setState(() {
+            _cameraError = 'No cameras found';
+            _isCameraReady = false;
+          });
+        }
+        return;
       }
 
-      _controller = CameraController(
-        _cameras[_currentCameraIndex],
-        _getResolutionFromQuality(),
-        enableAudio: false,
+      _cameraIndex = _cameras.indexWhere(
+        (camera) => camera.lensDirection == CameraLensDirection.back,
       );
+      if (_cameraIndex == -1) _cameraIndex = 0;
+
+      await _disposeController();
+
+      // Reset zoom before creating controller
+      _zoom = 1.0;
+      _baseZoom = 1.0;
+
+      _controller = CameraController(
+        _cameras[_cameraIndex],
+        _getResolution(),
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.jpeg,
+      );
+
+      // Add listener before initialization
+      _controller!.addListener(_onCameraControllerListener);
 
       await _controller!.initialize();
 
-      if (_isZoomSupported) {
-        _minZoomLevel = await _controller!.getMinZoomLevel();
-        _maxZoomLevel = await _controller!.getMaxZoomLevel();
-        _currentZoom = _minZoomLevel;
-        await _controller!.setZoomLevel(_currentZoom);
+      if (_isDisposed || _isNavigatingAway) {
+        await _disposeController();
+        return;
       }
 
-      if (mounted) {
+      _isControllerInitialized = true;
+
+      await _configureCamera();
+
+      if (mounted && !_isDisposed && !_isNavigatingAway) {
         setState(() {
           _isCameraReady = true;
+          _cameraError = '';
         });
       }
+    } on CameraException catch (e) {
+      print('CameraException: ${e.code} - ${e.description}');
+      _handleCameraError('Camera error: ${e.description}');
     } catch (e) {
-      print('Camera initialization error: $e');
-      if (mounted) {
-        _showErrorDialog('Camera Error', e.toString());
-      }
+      print('Camera init error: $e');
+      _handleCameraError('Camera initialization failed: $e');
+    } finally {
+      _isCameraInitializing = false;
     }
   }
 
-  ResolutionPreset _getResolutionFromQuality() {
-    switch (_imageQuality) {
-      case 'Low':
-        return ResolutionPreset.low;
-      case 'Medium':
-        return ResolutionPreset.medium;
-      case 'Ultra':
-        return ResolutionPreset.veryHigh;
-      case 'High':
-      default:
-        return ResolutionPreset.high;
+  void _onCameraControllerListener() {
+    if (_isDisposed || _isNavigatingAway || !mounted || _controller == null)
+      return;
+
+    if (_controller!.value.hasError) {
+      _handleCameraError(
+        'Camera error: ${_controller!.value.errorDescription}',
+      );
     }
   }
 
-  Future<void> _switchCamera() async {
-    if (_cameras.length < 2) return;
-
-    setState(() {
-      _isCameraReady = false;
-    });
-
-    await _controller!.dispose();
-
-    _currentCameraIndex = (_currentCameraIndex + 1) % _cameras.length;
-
-    _controller = CameraController(
-      _cameras[_currentCameraIndex],
-      _getResolutionFromQuality(),
-      enableAudio: false,
-    );
-
-    await _controller!.initialize();
-
-    if (mounted) {
+  void _handleCameraError(String error) {
+    if (mounted && !_isDisposed && !_isNavigatingAway) {
       setState(() {
-        _isCameraReady = true;
+        _cameraError = error;
+        _isCameraReady = false;
       });
     }
   }
 
-  Future<void> _toggleFlash() async {
-    if (_controller == null) return;
-
-    final modes = [FlashMode.off, FlashMode.auto, FlashMode.always];
-    final currentIndex = modes.indexOf(_currentFlash);
-    final nextIndex = (currentIndex + 1) % modes.length;
+  Future<void> _configureCamera() async {
+    if (_controller == null || !_controller!.value.isInitialized) return;
 
     try {
-      await _controller!.setFlashMode(modes[nextIndex]);
-      if (mounted) {
-        setState(() {
-          _currentFlash = modes[nextIndex];
-        });
+      try {
+        _minZoom = await _controller!.getMinZoomLevel();
+        _maxZoom = await _controller!.getMaxZoomLevel();
+        // Ensure zoom is within bounds and set explicitly
+        _zoom = _zoom.clamp(_minZoom, _maxZoom);
+        await _controller!.setZoomLevel(_zoom);
+      } catch (e) {
+        print('Zoom not supported: $e');
+        _minZoom = 1.0;
+        _maxZoom = 1.0;
+        _zoom = 1.0;
       }
+
+      await _controller!.setFocusMode(FocusMode.auto);
+      await _controller!.setExposureMode(ExposureMode.auto);
+      await _controller!.setFlashMode(_flashMode);
     } catch (e) {
-      print('Error setting flash: $e');
+      print('Camera configuration error: $e');
     }
   }
 
+  Future<void> _disposeController() async {
+    if (_controller != null) {
+      // Remove listener first
+      try {
+        _controller!.removeListener(_onCameraControllerListener);
+      } catch (e) {
+        print('Error removing listener: $e');
+      }
+
+      try {
+        await _controller!.dispose();
+      } catch (e) {
+        print('Error disposing controller: $e');
+      }
+      _controller = null;
+      _isControllerInitialized = false;
+      _isCameraReady = false;
+    }
+  }
+
+  ResolutionPreset _getResolution() {
+    switch (_quality) {
+      case 'Low':
+        return ResolutionPreset.medium;
+      case 'Medium':
+        return ResolutionPreset.high;
+      case 'Ultra':
+        return ResolutionPreset.max;
+      case 'High':
+      default:
+        return ResolutionPreset.veryHigh;
+    }
+  }
+
+  bool _canTakePicture() {
+    return _controller != null &&
+        _controller!.value.isInitialized &&
+        !_isCapturing &&
+        _isControllerInitialized &&
+        _isCameraReady &&
+        !_isDisposed &&
+        !_isNavigatingAway;
+  }
+
   Future<void> _takePicture() async {
-    if (_controller == null ||
-        !_controller!.value.isInitialized ||
-        _isCapturing) {
-      return;
+    if (!_canTakePicture()) return;
+
+    try {
+      await _controller!.setFocusMode(FocusMode.auto);
+      await _controller!.setExposureMode(ExposureMode.auto);
+    } catch (e) {
+      print('Focus/Exposure error: $e');
     }
 
-    // Start capture animation
-    _captureAnimationController.forward();
+    _captureAnim.forward();
+    setState(() => _isCapturing = true);
 
-    setState(() {
-      _isCapturing = true;
-    });
-
-    // Play sound if enabled
-    if (_soundOnCapture) {
+    if (_soundOn) {
       SystemSound.play(SystemSoundType.click);
     }
 
-    // Vibrate if enabled
-    if (_vibrationOnCapture && await Vibration.hasVibrator() == true) {
-      Vibration.vibrate(duration: 50);
+    if (_vibrateOn) {
+      try {
+        final hasVibrator = await Vibration.hasVibrator();
+        if (hasVibrator == true) {
+          Vibration.vibrate(duration: 50);
+        }
+      } catch (e) {
+        print('Vibration error: $e');
+      }
     }
 
     try {
-      // Capture image
       final image = await _controller!.takePicture();
 
-      // Create temporary file path
       final tempDir = await getTemporaryDirectory();
       final tempPath = path.join(
         tempDir.path,
         'temp_${DateTime.now().millisecondsSinceEpoch}.jpg',
       );
 
-      // Move to temp location
-      await File(image.path).copy(tempPath);
+      await File(image.path).rename(tempPath);
 
-      // Prepare metadata
       final timestamp = DateTime.now();
+      final loc = AppLocalizations.of(context)!;
 
-      // Process in background
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        try {
-          // Read image bytes
-          final originalBytes = await File(tempPath).readAsBytes();
+      final originalBytes = await File(tempPath).readAsBytes();
 
-          final loc = AppLocalizations.of(context);
+      final appDir = await getApplicationDocumentsDirectory();
+      final captureDir = path.join(appDir.path, 'captured_images');
+      final fileName = 'IMG_${timestamp.millisecondsSinceEpoch}';
 
-          String test = loc!.addressLabel;
-          print("test: $test");
-          // Process with MetadataService
-          final processedBytes = await MetadataService.addMetadataToImage(
-            originalBytes,
-            timestamp,
-            _currentCoords,
-            _showLocation ? _currentAddress : null,
-            locationLabel: loc.locationLabel,
-            addressLabel: loc.addressLabel,
-            datetimeLabel: loc.datetimeLabel,
-          );
+      String? originalPath;
+      if (_keepOriginal) {
+        originalPath = path.join(captureDir, 'original', '$fileName.jpg');
+        await Directory(path.dirname(originalPath)).create(recursive: true);
+        await File(originalPath).writeAsBytes(originalBytes);
+      }
 
-          // Create captured image object
-          final appDir = await getApplicationDocumentsDirectory();
-          final fileName = '${timestamp.millisecondsSinceEpoch}.jpg';
-          final savedPath = path.join(appDir.path, 'captured_images', fileName);
+      final processed = await MetadataService.addMetadataToImage(
+        originalBytes,
+        timestamp,
+        _coords,
+        _address,
+        locationLabel: loc.locationLabel,
+        addressLabel: loc.addressLabel,
+        datetimeLabel: loc.datetimeLabel,
+      );
 
-          // Ensure directory exists
-          await Directory(path.dirname(savedPath)).create(recursive: true);
+      final watermarkedPath = path.join(
+        captureDir,
+        'watermarked',
+        '$fileName.jpg',
+      );
+      await Directory(path.dirname(watermarkedPath)).create(recursive: true);
+      await File(watermarkedPath).writeAsBytes(processed);
 
-          // Save processed image
-          await File(savedPath).writeAsBytes(processedBytes);
+      if (await File(tempPath).exists()) {
+        await File(tempPath).delete();
+      }
 
-          // Create and add to storage
-          final capturedImage = CapturedImage(
-            id: timestamp.millisecondsSinceEpoch.toString(),
-            imagePath: savedPath,
-            timestamp: timestamp,
-            location: _currentCoords,
-            address: _showLocation ? _currentAddress : null,
-            additionalData: {
-              'device': 'Mobile',
-              'app': 'SV',
-              'flash': _currentFlash.toString(),
-              'camera': _cameras[_currentCameraIndex].lensDirection.toString(),
-              'quality': _imageQuality,
-              'zoom': _currentZoom.toStringAsFixed(1),
-            },
-          );
+      _storageService.capturedImages.insert(
+        0,
+        CapturedImage(
+          id: timestamp.millisecondsSinceEpoch.toString(),
+          imagePath: watermarkedPath,
+          originalPath: originalPath,
+          timestamp: timestamp,
+          location: _coords,
+          address: _address,
+          additionalData: {
+            'quality': _quality,
+            'zoom': _zoom.toStringAsFixed(1),
+            'flash': _flashMode.toString(),
+          },
+        ),
+      );
 
-          _storageService.capturedImages.insert(0, capturedImage);
-
-          // Clean up temp file
-          await File(tempPath).delete();
-
-          if (mounted) {
-            // Show success
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Image captured successfully!'),
-                backgroundColor: Colors.green,
-                duration: Duration(seconds: 1),
-              ),
-            );
-          }
-        } catch (e) {
-          print('Error processing image: $e');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Error: ${e.toString()}'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
-        } finally {
-          if (mounted) {
-            _captureAnimationController.reverse();
-            setState(() {
-              _isCapturing = false;
-            });
-          }
-        }
-      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✓ Captured...'),
+            backgroundColor: Colors.green,
+            duration: Duration(milliseconds: 800),
+          ),
+        );
+      }
     } catch (e) {
       print('Capture error: $e');
       if (mounted) {
-        _captureAnimationController.reverse();
-        setState(() {
-          _isCapturing = false;
-        });
-        _showErrorDialog('Capture Failed', e.toString());
-      }
-    }
-  }
-
-  Widget _buildCameraView() {
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: _controller != null && _controller!.value.isInitialized
-              ? GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-
-                  onScaleStart: (details) {
-                    _baseZoomLevel = _currentZoom;
-                  },
-
-                  onScaleUpdate: (details) async {
-                    if (!_isZoomSupported) return;
-
-                    _scaleZoom = (_baseZoomLevel * details.scale).clamp(
-                      _minZoomLevel,
-                      _maxZoomLevel,
-                    );
-
-                    if (_scaleZoom != _currentZoom) {
-                      _currentZoom = _scaleZoom;
-                      await _controller?.setZoomLevel(_currentZoom);
-
-                      if (mounted) {
-                        setState(() {});
-                      }
-                    }
-                  },
-
-                  child: FittedBox(
-                    fit: BoxFit.cover,
-                    child: SizedBox(
-                      width: _controller!.value.previewSize!.height,
-                      height: _controller!.value.previewSize!.width,
-                      child: CameraPreview(_controller!),
-                    ),
-                  ),
-                )
-              : Container(color: Colors.black),
-        ),
-
-        // Top Controls
-        Positioned(
-          top: MediaQuery.of(context).padding.top + 10,
-          left: 0,
-          right: 0,
-          child: _buildTopControls(),
-        ),
-
-        // Watermark Overlay
-        //_buildPositionedWatermark(),
-
-        // Flash animation overlay
-        if (_flashAnimationController.isAnimating)
-          Positioned.fill(
-            child: AnimatedBuilder(
-              animation: _flashAnimationController,
-              builder: (context, child) {
-                return Container(
-                  color: Colors.white.withOpacity(
-                    _flashAnimationController.value * 0.7,
-                  ),
-                );
-              },
+        final errorMsg = e.toString();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Failed: ${errorMsg.substring(0, min(50, errorMsg.length))}',
             ),
-          ),
-
-        // Bottom Controls
-        Positioned(
-          bottom: 30,
-          left: 0,
-          right: 0,
-          child: _buildCameraControls(),
-        ),
-
-        // Zoom slider overlay
-        if (_isZooming) _buildZoomOverlay(),
-      ],
-    );
-  }
-
-  Widget _buildTopControls() {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            // Flash Button
-            IconButton(
-              icon: Icon(
-                _currentFlash == FlashMode.off
-                    ? Icons.flash_off
-                    : _currentFlash == FlashMode.auto
-                    ? Icons.flash_auto
-                    : Icons.flash_on,
-                color: Colors.white,
-                size: 28,
-              ),
-              onPressed: _toggleFlash,
-            ),
-            // Switch Camera
-            IconButton(
-              icon: const Icon(
-                Icons.cameraswitch,
-                color: Colors.white,
-                size: 28,
-              ),
-              onPressed: _cameras.length > 1 ? _switchCamera : null,
-              tooltip: 'Switch camera',
-            ),
-
-            // Settings button
-            IconButton(
-              icon: const Icon(Icons.settings, color: Colors.white, size: 28),
-              onPressed: _navigateToSettings,
-              tooltip: 'Settings',
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildZoomOverlay() {
-    // Hide slider if zoom not supported or no range
-    if (!_isZoomSupported || (_minZoomLevel == _maxZoomLevel))
-      return SizedBox.shrink();
-
-    // Use divisions only if range > 0.1
-    final double range = _maxZoomLevel - _minZoomLevel;
-    final int? divisions = range > 0.1 ? (range * 10).toInt() : null;
-
-    return Positioned(
-      right: 20,
-      top: MediaQuery.of(context).size.height / 2 - 100,
-      child: Container(
-        width: 60,
-        height: 200,
-        decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.7),
-          borderRadius: BorderRadius.circular(30),
-        ),
-        child: RotatedBox(
-          quarterTurns: 3,
-          child: Slider(
-            value: _currentZoom.clamp(_minZoomLevel, _maxZoomLevel),
-            min: _minZoomLevel,
-            max: _maxZoomLevel,
-            divisions: divisions,
-            activeColor: Colors.white,
-            inactiveColor: Colors.grey,
-            onChangeStart: (_) {
-              setState(() => _isZooming = true);
-            },
-            onChanged: (value) {
-              // Update slider thumb immediately
-              setState(() {
-                _currentZoom = value.clamp(_minZoomLevel, _maxZoomLevel);
-              });
-            },
-            onChangeEnd: (value) async {
-              final zoomValue = value.clamp(_minZoomLevel, _maxZoomLevel);
-              try {
-                // Only call async zoom after user finishes dragging
-                await _controller?.setZoomLevel(zoomValue);
-              } catch (e) {
-                print("Zoom error: $e");
-              }
-
-              // Hide overlay after a short delay
-              Future.delayed(
-                const Duration(milliseconds: 500),
-                () => setState(() => _isZooming = false),
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCameraControls() {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 0),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            // Gallery button
-            GestureDetector(
-              onTap: _showGalleryPreview,
-              child: _storageService.capturedImages.isNotEmpty
-                  ? ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.file(
-                        File(_storageService.capturedImages.first.imagePath),
-                        width: 48,
-                        height: 48,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          // fallback to icon if image fails
-                          return const Icon(
-                            Icons.photo_library,
-                            color: Colors.white,
-                            size: 32,
-                          );
-                        },
-                      ),
-                    )
-                  : const Icon(
-                      Icons.photo_library,
-                      color: Colors.white,
-                      size: 32,
-                    ),
-            ),
-
-            // Capture Button
-            AnimatedBuilder(
-              animation: _captureAnimation,
-              builder: (context, child) {
-                return Transform.scale(
-                  scale: _captureAnimation.value,
-                  child: _buildCaptureButton(),
-                );
-              },
-            ),
-
-            // Watermark customization
-            IconButton(
-              icon: const Icon(Icons.brush, color: Colors.white, size: 32),
-              onPressed: _showWatermarkCustomization,
-              tooltip: 'Customize watermark',
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCaptureButton() {
-    return GestureDetector(
-      onTap: _isCapturing ? null : _takePicture,
-      child: Container(
-        height: 80,
-        width: 80,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: Colors.transparent,
-          border: Border.all(
-            color: _isCapturing ? Colors.grey : Colors.white,
-            width: _isCapturing ? 3 : 5,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: _isCapturing
-                  ? Colors.grey.withOpacity(0.5)
-                  : Colors.white.withOpacity(0.3),
-              blurRadius: 15,
-              spreadRadius: 2,
-            ),
-          ],
-        ),
-        child: Center(
-          child: _isCapturing
-              ? CircularProgressIndicator(
-                  color: Theme.of(context).colorScheme.primary,
-                  strokeWidth: 3,
-                )
-              : Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 2),
-                  ),
-                  padding: const EdgeInsets.all(2),
-                  child: Container(
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white,
-                    ),
-                    padding: const EdgeInsets.all(8),
-                  ),
-                ),
-        ),
-      ),
-    );
-  }
-
-  void _navigateToSettings() async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const SettingsScreen()),
-    );
-
-    // Reload settings when returning from settings screen
-    if (mounted) {
-      // Reinitialize camera with new quality settings if needed
-      if (_controller != null && _controller!.value.isInitialized) {
-        await _controller!.dispose();
-        await _initializeCamera();
-      }
-
-      // Reload settings directly from SharedPreferences
-      await _reloadSettingsFromPrefs();
-    }
-  }
-
-  Future<void> _reloadSettingsFromPrefs() async {
-    final prefs = await SharedPreferences.getInstance();
-
-    setState(() {
-      _soundOnCapture = prefs.getBool('sound_on_capture') ?? true;
-      _vibrationOnCapture = prefs.getBool('vibration_on_capture') ?? true;
-      _imageQuality = prefs.getString('image_quality') ?? 'High';
-      _watermarkOpacity = prefs.getDouble('watermark_opacity') ?? 0.8;
-      _watermarkSize = prefs.getDouble('watermark_size') ?? 25.0;
-    });
-  }
-
-  void _showErrorDialog(String title, String message) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showGalleryPreview() {
-    if (_storageService.capturedImages.isNotEmpty) {
-      showModalBottomSheet(
-        context: context,
-        backgroundColor: Colors.transparent,
-        isScrollControlled: true,
-        builder: (context) => _buildGalleryPreview(),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No photos yet. Capture some first!'),
-          duration: Duration(seconds: 1),
-        ),
-      );
-    }
-  }
-
-  Widget _buildGalleryPreview() {
-    return DraggableScrollableSheet(
-      initialChildSize: 0.7,
-      minChildSize: 0.3,
-      maxChildSize: 0.9,
-      builder: (context, scrollController) {
-        return Container(
-          decoration: BoxDecoration(
-            color: Colors.grey[900],
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          child: Column(
-            children: [
-              // Handle
-              Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.symmetric(vertical: 12),
-                decoration: BoxDecoration(
-                  color: Colors.grey[700],
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              // Title
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Recent Photos',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text(
-                        'Close',
-                        style: TextStyle(color: Colors.blue),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // Images grid
-              Expanded(
-                child: GridView.builder(
-                  controller: scrollController,
-                  padding: const EdgeInsets.all(16),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    crossAxisSpacing: 8,
-                    mainAxisSpacing: 8,
-                  ),
-                  itemCount: _storageService.capturedImages.length,
-                  itemBuilder: (context, index) {
-                    final image = _storageService.capturedImages[index];
-                    return GestureDetector(
-                      onTap: () => _showFullImage(image),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.file(
-                          File(image.imagePath),
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              color: Colors.grey,
-                              child: const Icon(Icons.error),
-                            );
-                          },
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
+            backgroundColor: Colors.red,
           ),
         );
-      },
-    );
+      }
+    } finally {
+      if (mounted) {
+        _captureAnim.reverse();
+        setState(() => _isCapturing = false);
+      }
+    }
   }
 
-  void _showFullImage(CapturedImage image) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => FullScreenImageViewer(image: image),
-      ),
-    );
+  Future<void> _switchCamera() async {
+    if (_cameras.length < 2 || _isCapturing || _isCameraInitializing) return;
+
+    _zoomDebounceTimer?.cancel();
+    _isCameraInitializing = true;
+
+    // Update UI to show loading state
+    setState(() {
+      _isCameraReady = false;
+      _isControllerInitialized = false;
+      _isZooming = false;
+      _zoom = 1.0;
+      _baseZoom = 1.0;
+    });
+
+    try {
+      await _disposeController();
+
+      _cameraIndex = (_cameraIndex + 1) % _cameras.length;
+
+      _controller = CameraController(
+        _cameras[_cameraIndex],
+        _getResolution(),
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.jpeg,
+      );
+
+      // Add listener before initialization
+      _controller!.addListener(_onCameraControllerListener);
+
+      await _controller!.initialize();
+
+      if (_isDisposed || _isNavigatingAway) {
+        await _disposeController();
+        return;
+      }
+
+      _isControllerInitialized = true;
+
+      // Configure camera settings
+      try {
+        _minZoom = await _controller!.getMinZoomLevel();
+        _maxZoom = await _controller!.getMaxZoomLevel();
+        _zoom = _minZoom > 1.0 ? _minZoom : 1.0;
+        _baseZoom = _zoom;
+        await _controller!.setZoomLevel(_zoom);
+      } catch (e) {
+        print('Zoom not supported on this camera: $e');
+        _minZoom = 1.0;
+        _maxZoom = 1.0;
+        _zoom = 1.0;
+        _baseZoom = 1.0;
+      }
+
+      await _controller!.setFocusMode(FocusMode.auto);
+      await _controller!.setExposureMode(ExposureMode.auto);
+      await _controller!.setFlashMode(_flashMode);
+
+      if (mounted && !_isDisposed && !_isNavigatingAway) {
+        setState(() {
+          _isCameraReady = true;
+          _cameraError = '';
+        });
+      }
+    } catch (e) {
+      print('Switch camera error: $e');
+      if (mounted && !_isDisposed && !_isNavigatingAway) {
+        setState(() {
+          _cameraError = 'Failed to switch camera: $e';
+          _isCameraReady = false;
+        });
+      }
+    } finally {
+      _isCameraInitializing = false;
+    }
   }
 
-  void _showWatermarkCustomization() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => Container(
-          decoration: BoxDecoration(
-            color: Colors.grey[900],
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Customize Watermark',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              Row(
-                children: [
-                  const Icon(Icons.text_fields, color: Colors.white),
-                  const SizedBox(width: 10),
-                  const Text(
-                    'Text Size:',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                  const Spacer(),
-                  Text(
-                    '${_watermarkSize.toInt()}px',
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                ],
-              ),
-              Slider(
-                value: _watermarkSize,
-                min: 20.0,
-                max: 100.0,
-                // divisions: 6,
-                label: '${_watermarkSize.toInt()}px',
-                onChanged: (value) => setState(() => _watermarkSize = value),
-                onChangeEnd: (value) => _saveSetting('watermark_size', value),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+  void _toggleFlash() async {
+    if (!_canInteractWithCamera()) return;
+
+    try {
+      const modes = [
+        FlashMode.off,
+        FlashMode.auto,
+        FlashMode.always,
+        FlashMode.torch,
+      ];
+      final currentIndex = modes.indexOf(_flashMode);
+      final nextIndex = (currentIndex + 1) % modes.length;
+      final newMode = modes[nextIndex];
+
+      await _controller!.setFlashMode(newMode);
+      if (mounted) setState(() => _flashMode = newMode);
+    } catch (e) {
+      print('Flash error: $e');
+    }
   }
 
-  Future<void> _saveSetting<T>(String key, T value) async {
-    final _prefs = await SharedPreferences.getInstance();
-    if (value is bool) {
-      await _prefs.setBool(key, value);
-    } else if (value is String) {
-      await _prefs.setString(key, value);
-    } else if (value is double) {
-      await _prefs.setDouble(key, value);
-    } else if (value is int) {
-      await _prefs.setInt(key, value);
+  bool _canInteractWithCamera() {
+    return _controller != null &&
+        _controller!.value.isInitialized &&
+        _isCameraReady &&
+        !_isCapturing &&
+        !_isDisposed &&
+        !_isNavigatingAway;
+  }
+
+  void _onScaleStart(ScaleStartDetails details) {
+    if (!_canInteractWithCamera()) return;
+    _baseZoom = _zoom;
+    setState(() => _isZooming = true);
+  }
+
+  void _onScaleUpdate(ScaleUpdateDetails details) async {
+    if (!_canInteractWithCamera() || _controller == null) return;
+
+    try {
+      double zoom = (_baseZoom * details.scale).clamp(_minZoom, _maxZoom);
+      if ((zoom - _zoom).abs() > 0.01) {
+        await _controller!.setZoomLevel(zoom);
+        if (mounted && !_isDisposed) {
+          setState(() => _zoom = zoom);
+        }
+      }
+    } catch (e) {
+      print('Zoom error: $e');
+    }
+  }
+
+  void _onScaleEnd(ScaleEndDetails details) {
+    if (mounted) setState(() => _isZooming = false);
+  }
+
+  void _onFocusTap(TapUpDetails details) {
+    if (!_canInteractWithCamera() || _controller == null) return;
+
+    final box = context.findRenderObject() as RenderBox;
+    final localPosition = box.globalToLocal(details.globalPosition);
+    final size = box.size;
+
+    double x = (localPosition.dx / size.width).clamp(0.0, 1.0);
+    double y = (localPosition.dy / size.height).clamp(0.0, 1.0);
+
+    setState(() {
+      _showFocusRing = true;
+      _focusPosition = localPosition;
+    });
+
+    _focusAnimation.forward(from: 0.0);
+
+    _focusTimer?.cancel();
+    _focusTimer = Timer(const Duration(milliseconds: 2000), () {
+      if (mounted) setState(() => _showFocusRing = false);
+    });
+
+    try {
+      _controller!.setFocusPoint(Offset(x, y));
+      _controller!.setExposurePoint(Offset(x, y));
+    } catch (e) {
+      print('Focus error: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    _storageService = Provider.of<StorageService>(context);
+
     return Scaffold(
       backgroundColor: Colors.black,
-      body: _isCameraReady
-          ? _buildCameraView()
-          : const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+      body: OrientationBuilder(
+        builder: (context, orientation) {
+          _currentOrientation = orientation;
+          return _buildBody();
+        },
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_cameraError.isNotEmpty && !_isCameraReady) {
+      return _buildError();
+    }
+
+    return _buildCamera();
+  }
+
+  Widget _buildCamera() {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        _buildPreview(),
+
+        if (_showFocusRing)
+          Positioned(
+            left: _focusPosition.dx - 40,
+            top: _focusPosition.dy - 40,
+            child: AnimatedBuilder(
+              animation: _focusAnimation,
+              builder: (_, __) => Opacity(
+                opacity: 1 - _focusAnimation.value,
+                child: Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.amber, width: 2),
+                    borderRadius: BorderRadius.circular(40),
+                  ),
+                  child: Center(
+                    child: Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(
+                        color: Colors.amber,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+        SafeArea(
+          child: _currentOrientation == Orientation.portrait
+              ? _buildPortraitUI()
+              : _buildLandscapeUI(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPreview() {
+    // Safe check for controller and initialization
+    if (_controller == null ||
+        !_controller!.value.isInitialized ||
+        !_isCameraReady ||
+        _isCameraInitializing) {
+      return _buildLoading();
+    }
+
+    // Full-screen camera preview with proper scaling
+    return GestureDetector(
+      onTapUp: _onFocusTap,
+      onScaleStart: _onScaleStart,
+      onScaleUpdate: _onScaleUpdate,
+      onScaleEnd: _onScaleEnd,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: double.infinity,
+        height: double.infinity,
+        color: Colors.black,
+        child: CameraPreview(_controller!),
+      ),
+    );
+  }
+
+  Widget _buildLoading() {
+    return Container(
+      color: Colors.black,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const CircularProgressIndicator(color: Colors.white),
+            const SizedBox(height: 20),
+            Text(
+              _isCameraInitializing
+                  ? 'Switching camera...'
+                  : 'Initializing camera...',
+              style: const TextStyle(color: Colors.white),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Modern iOS-style frosted glass top bar
+  Widget _buildTopBar() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: Colors.white.withOpacity(0.2),
+              width: 0.5,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _flashButton(),
+              const SizedBox(width: 16),
+              _iconButton(
+                Icons.cameraswitch_outlined,
+                _switchCamera,
+                enabled:
+                    _cameras.length > 1 &&
+                    !_isCapturing &&
+                    !_isCameraInitializing,
+              ),
+              const SizedBox(width: 16),
+              _iconButton(
+                Icons.settings_outlined,
+                _navigateToSettings,
+                enabled: !_isCapturing && !_isCameraInitializing,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Flash button with "Auto" label when in auto mode
+  Widget _flashButton() {
+    final isAuto = _flashMode == FlashMode.auto;
+    final canInteract = _canInteractWithCamera();
+
+    return GestureDetector(
+      onTap: canInteract ? _toggleFlash : null,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: isAuto
+            ? BoxDecoration(
+                color: Colors.white.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(12),
+              )
+            : null,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              _flashIcon,
+              color: canInteract ? Colors.white : Colors.white30,
+              size: 22,
+            ),
+            if (isAuto) ...[
+              const SizedBox(width: 4),
+              Text(
+                'Auto',
+                style: TextStyle(
+                  color: canInteract ? Colors.white : Colors.white30,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Modern iOS-style frosted glass bottom panel
+  Widget _buildBottomPanel() {
+    return ClipRRect(
+      borderRadius: const BorderRadius.only(
+        topLeft: Radius.circular(24),
+        topRight: Radius.circular(24),
+      ),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.15),
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(24),
+              topRight: Radius.circular(24),
+            ),
+            border: Border(
+              top: BorderSide(color: Colors.white.withOpacity(0.2), width: 0.5),
+            ),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _galleryThumb(),
+                _captureButton(),
+                _iconButton(
+                  Icons.brush_outlined,
+                  _showWatermarkSettings,
+                  enabled: !_isCapturing && !_isCameraInitializing,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPortraitUI() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        // Top bar with frosted glass effect
+        Padding(
+          padding: const EdgeInsets.only(top: 8, left: 16, right: 16),
+          child: Align(alignment: Alignment.topCenter, child: _buildTopBar()),
+        ),
+
+        if (_isZooming) Center(child: _buildZoomIndicator()),
+
+        // Bottom frosted panel
+        _buildBottomPanel(),
+      ],
+    );
+  }
+
+  Widget _buildLandscapeUI() {
+    return NativeDeviceOrientedWidget(
+      useSensor: true,
+      portraitUp: (context) => _buildOrientedUI(0),
+      portraitDown: (context) => _buildOrientedUI(2),
+      landscapeLeft: (context) => _buildOrientedUI(3),
+      landscapeRight: (context) => _buildOrientedUI(1),
+      fallback: (context) => _buildOrientedUI(0),
+    );
+  }
+
+  Widget _buildOrientedUI(int quarterTurns) {
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(statusBarColor: Colors.transparent),
+      child: RotatedBox(
+        quarterTurns: quarterTurns,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 8, left: 16, right: 16),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: _buildTopBar(),
+              ),
+            ),
+
+            if (_isZooming) Center(child: _buildZoomIndicator()),
+
+            _buildBottomPanel(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  IconData get _flashIcon {
+    switch (_flashMode) {
+      case FlashMode.off:
+        return Icons.flash_off_rounded;
+      case FlashMode.auto:
+        return Icons.flash_on_rounded;
+      case FlashMode.torch:
+        return Icons.flashlight_on_rounded;
+      default:
+        return Icons.flash_on_rounded;
+    }
+  }
+
+  Widget _buildZoomIndicator() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.7),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        '${_zoom.toStringAsFixed(1)}x',
+        style: const TextStyle(color: Colors.white, fontSize: 14),
+      ),
+    );
+  }
+
+  Widget _galleryThumb() {
+    final hasImages = _storageService.capturedImages.isNotEmpty;
+
+    return GestureDetector(
+      onTap: hasImages ? _showGallery : null,
+      child: Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: hasImages ? Colors.white.withOpacity(0.5) : Colors.white30,
+            width: 2,
+          ),
+          color: Colors.black.withOpacity(0.3),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: hasImages
+              ? Image.file(
+                  File(_storageService.capturedImages.first.imagePath),
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Icon(
+                    Icons.photo_library,
+                    color: hasImages ? Colors.white : Colors.white30,
+                    size: 24,
+                  ),
+                )
+              : Icon(Icons.photo_library, color: Colors.white30, size: 24),
+        ),
+      ),
+    );
+  }
+
+  // Modern iOS-style capture button with white ring and solid center
+  Widget _captureButton() {
+    final canCapture = _canTakePicture();
+
+    return AnimatedBuilder(
+      animation: _captureAnim,
+      builder: (_, __) => Transform.scale(
+        scale: 1 - (_captureAnim.value * 0.1),
+        child: GestureDetector(
+          onTap: canCapture ? _takePicture : null,
+          child: Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: canCapture ? Colors.white : Colors.white30,
+                width: 4,
+              ),
+            ),
+            child: Center(
+              child: _isCapturing
+                  ? SizedBox(
+                      width: 56,
+                      height: 56,
+                      child: CircularProgressIndicator(
+                        valueColor: const AlwaysStoppedAnimation<Color>(
+                          Colors.white,
+                        ),
+                        strokeWidth: 3,
+                        backgroundColor: Colors.transparent,
+                      ),
+                    )
+                  : Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: canCapture ? Colors.white : Colors.white30,
+                      ),
+                    ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _iconButton(IconData icon, VoidCallback onTap, {bool enabled = true}) {
+    return IconButton(
+      icon: Icon(
+        icon,
+        color: enabled ? Colors.white : Colors.white30,
+        size: 26,
+      ),
+      onPressed: enabled ? onTap : null,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(),
+    );
+  }
+
+  Widget _buildError() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.error_outline, color: Colors.red, size: 48),
+          const SizedBox(height: 16),
+          Text(
+            _cameraError,
+            style: const TextStyle(color: Colors.white),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton(onPressed: _initCamera, child: const Text('Retry')),
+        ],
+      ),
+    );
+  }
+
+  void _navigateToSettings() async {
+    if (_isNavigatingAway || _isCapturing) return;
+
+    _isNavigatingAway = true;
+
+    // Dispose first, then navigate
+    await _disposeController();
+    if (!mounted) return;
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+    );
+
+    if (mounted) {
+      _isNavigatingAway = false;
+      await _loadPrefs();
+      await _initCamera();
+    }
+  }
+
+  void _showWatermarkSettings() {
+    if (!mounted || _isCapturing) return;
+
+    double tempSize = _watermarkSize;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E1E),
+      isDismissible: true,
+      enableDrag: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Watermark Size',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
                 children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 20),
+                  const Icon(Icons.text_fields, color: Colors.white),
+                  Expanded(
+                    child: Slider(
+                      value: tempSize,
+                      min: 20,
+                      max: 100,
+                      divisions: 16,
+                      activeColor: Colors.blue,
+                      onChanged: (v) => setModalState(() => tempSize = v),
+                    ),
+                  ),
                   Text(
-                    'Initializing camera...',
-                    style: TextStyle(color: Colors.white),
+                    '${tempSize.toInt()}px',
+                    style: const TextStyle(color: Colors.white),
                   ),
                 ],
               ),
-            ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () {
+                      setState(() => _watermarkSize = tempSize);
+                      _prefs.setDouble('watermark_size', tempSize);
+                      Navigator.pop(context);
+                    },
+                    child: const Text('Apply'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
+  }
+
+  void _showGallery() async {
+    if (_storageService.capturedImages.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('No photos yet')));
+      return;
+    }
+
+    if (_isNavigatingAway) return;
+
+    _isNavigatingAway = true;
+    await _disposeController();
+
+    if (!mounted) return;
+
+    GalleryScreenBottomSheet.show(context);
+
+    if (mounted) {
+      _isNavigatingAway = false;
+      await _initCamera();
+    }
   }
 
   @override
   void dispose() {
+    _isDisposed = true;
     WidgetsBinding.instance.removeObserver(this);
-    _captureAnimationController.dispose();
-    _flashAnimationController.dispose();
-    _controller?.dispose();
-    _zoomOverlay?.remove();
+    _captureAnim.dispose();
+    _focusAnimation.dispose();
+    _zoomDebounceTimer?.cancel();
+    _focusTimer?.cancel();
+    _disposeController();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_controller == null || !_controller!.value.isInitialized) {
-      return;
-    }
+    if (_isDisposed || _isNavigatingAway) return;
 
-    if (state == AppLifecycleState.inactive) {
-      _controller?.dispose();
-    } else if (state == AppLifecycleState.resumed) {
-      if (_controller != null && !_controller!.value.isInitialized) {
-        _initializeCamera();
-      }
+    switch (state) {
+      case AppLifecycleState.resumed:
+        if (_controller == null || !_controller!.value.isInitialized) {
+          _initCamera();
+        }
+        break;
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.detached:
+      case AppLifecycleState.hidden:
+        if (!_isNavigatingAway) {
+          _disposeController();
+        }
+        break;
     }
   }
 }

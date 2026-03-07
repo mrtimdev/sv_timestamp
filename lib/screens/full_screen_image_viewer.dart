@@ -2,75 +2,349 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:gallery_saver_plus/gallery_saver.dart';
 import 'package:photo_view/photo_view.dart';
+import 'package:photo_view/photo_view_gallery.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:flutter/services.dart';
 import '../models/captured_image.dart';
+import '../utils/storage_service.dart';
+import 'package:provider/provider.dart';
 
 class FullScreenImageViewer extends StatefulWidget {
   final CapturedImage image;
+  final bool showOriginal; // New parameter
 
-  const FullScreenImageViewer({super.key, required this.image});
+  const FullScreenImageViewer({
+    super.key,
+    required this.image,
+    this.showOriginal = false, // Default to watermarked
+  });
 
   @override
   State<FullScreenImageViewer> createState() => _FullScreenImageViewerState();
 }
 
-class _FullScreenImageViewerState extends State<FullScreenImageViewer> {
+class _FullScreenImageViewerState extends State<FullScreenImageViewer>
+    with SingleTickerProviderStateMixin {
+  late bool _isShowingOriginal;
+  late AnimationController _toggleAnimController;
+  late Animation<double> _fadeAnimation;
+  bool _showControls = true;
+  String? _currentImagePath;
+
+  @override
+  void initState() {
+    super.initState();
+    _isShowingOriginal = widget.showOriginal;
+    _currentImagePath = _getCurrentImagePath();
+
+    _toggleAnimController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _toggleAnimController, curve: Curves.easeIn),
+    );
+
+    _toggleAnimController.forward();
+  }
+
+  String _getCurrentImagePath() {
+    if (_isShowingOriginal && widget.image.originalPath != null) {
+      return widget.image.originalPath!;
+    }
+    return widget.image.imagePath;
+  }
+
+  void _toggleImageVersion() {
+    if (widget.image.originalPath == null) {
+      _showSnackBar(context, 'Original image not available', Colors.orange);
+      return;
+    }
+
+    _toggleAnimController.reset();
+    setState(() {
+      _isShowingOriginal = !_isShowingOriginal;
+      _currentImagePath = _getCurrentImagePath();
+    });
+    _toggleAnimController.forward();
+
+    _showSnackBar(
+      context,
+      _isShowingOriginal
+          ? 'Showing original image'
+          : 'Showing watermarked image',
+      Colors.blue,
+      duration: const Duration(milliseconds: 800),
+    );
+  }
+
+  void _toggleControls() {
+    setState(() {
+      _showControls = !_showControls;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black87,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.share, color: Colors.white),
-            onPressed: () => _shareImage(context),
+      body: Stack(
+        children: [
+          // Image Viewer
+          GestureDetector(
+            onTap: _toggleControls,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              child: FadeTransition(
+                key: ValueKey<String>(_currentImagePath!),
+                opacity: _fadeAnimation,
+                child: PhotoView(
+                  imageProvider: FileImage(File(_currentImagePath!)),
+                  backgroundDecoration: const BoxDecoration(
+                    color: Colors.black,
+                  ),
+                  minScale: PhotoViewComputedScale.contained,
+                  maxScale: PhotoViewComputedScale.covered * 3,
+                  initialScale: PhotoViewComputedScale.contained,
+                  heroAttributes: PhotoViewHeroAttributes(
+                    tag: widget.image.imagePath,
+                    transitionOnUserGestures: true,
+                  ),
+                  loadingBuilder: (context, event) => Center(
+                    child: Container(
+                      width: 50,
+                      height: 50,
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(25),
+                      ),
+                      child: const CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    ),
+                  ),
+                  errorBuilder: (context, error, stackTrace) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.broken_image,
+                            color: Colors.grey[600],
+                            size: 80,
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Failed to load image',
+                            style: TextStyle(color: Colors.grey[400]),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
           ),
-          IconButton(
-            icon: const Icon(Icons.save_alt, color: Colors.white),
-            onPressed: () => _saveImageToGallery(context),
+
+          // Top Bar (animated visibility)
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 200),
+            top: _showControls
+                ? 0
+                : -kToolbarHeight - MediaQuery.of(context).padding.top,
+            left: 0,
+            right: 0,
+            child: _buildAppBar(),
           ),
-          IconButton(
-            icon: const Icon(Icons.info_outline, color: Colors.white),
-            onPressed: () => _showImageDetails(context),
-          ),
-          IconButton(
-            icon: const Icon(Icons.more_vert, color: Colors.white),
-            onPressed: () => _showMoreOptions(context),
+
+          // Bottom Bar (animated visibility)
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 200),
+            bottom: _showControls ? 0 : -100,
+            left: 0,
+            right: 0,
+            child: _buildBottomBar(),
           ),
         ],
       ),
-      body: Center(
-        child: PhotoView(
-          imageProvider: FileImage(File(widget.image.imagePath)),
-          backgroundDecoration: const BoxDecoration(color: Colors.black),
-          minScale: PhotoViewComputedScale.contained,
-          maxScale: PhotoViewComputedScale.covered * 2,
-          initialScale: PhotoViewComputedScale.contained,
-          heroAttributes: PhotoViewHeroAttributes(tag: widget.image.imagePath),
+    );
+  }
+
+  Widget _buildAppBar() {
+    return Container(
+      padding: EdgeInsets.only(
+        top: MediaQuery.of(context).padding.top,
+        left: 8,
+        right: 8,
+      ),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Colors.black.withOpacity(0.8), Colors.transparent],
+        ),
+      ),
+      child: SafeArea(
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            // Back button with cool effect
+            _buildIconButton(
+              icon: Icons.arrow_back_ios_new,
+              onPressed: () => Navigator.pop(context),
+              tooltip: 'Back',
+            ),
+
+            // Center title with date
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _formatDate(widget.image.timestamp),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _formatTime(widget.image.timestamp),
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.7),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Toggle button (original/watermarked)
+            if (widget.image.originalPath != null)
+              _buildIconButton(
+                icon: _isShowingOriginal ? Icons.water_drop : Icons.image,
+                onPressed: _toggleImageVersion,
+                tooltip: _isShowingOriginal
+                    ? 'Show watermarked'
+                    : 'Show original',
+                color: _isShowingOriginal ? Colors.orange : Colors.blue,
+              ),
+          ],
         ),
       ),
     );
   }
 
+  Widget _buildBottomBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.bottomCenter,
+          end: Alignment.topCenter,
+          colors: [Colors.black.withOpacity(0.8), Colors.transparent],
+        ),
+      ),
+      child: SafeArea(
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _buildActionButton(
+              icon: Icons.share,
+              label: 'Share',
+              onPressed: () => _shareImage(context),
+            ),
+            _buildActionButton(
+              icon: Icons.save_alt,
+              label: 'Save',
+              onPressed: () => _saveImageToGallery(context),
+            ),
+            _buildActionButton(
+              icon: Icons.info_outline,
+              label: 'Info',
+              onPressed: () => _showImageDetails(context),
+            ),
+            _buildActionButton(
+              icon: Icons.more_vert,
+              label: 'More',
+              onPressed: () => _showMoreOptions(context),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIconButton({
+    required IconData icon,
+    required VoidCallback onPressed,
+    String? tooltip,
+    Color color = Colors.white,
+  }) {
+    return Container(
+      decoration: BoxDecoration(color: Colors.black38, shape: BoxShape.circle),
+      child: IconButton(
+        icon: Icon(icon, color: color),
+        onPressed: onPressed,
+        tooltip: tooltip,
+        splashRadius: 24,
+      ),
+    );
+  }
+
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+  }) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.black38,
+          borderRadius: BorderRadius.circular(25),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.white, size: 22),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: const TextStyle(color: Colors.white, fontSize: 11),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
+  }
+
+  String _formatTime(DateTime date) {
+    final hour = date.hour % 12 == 0 ? 12 : date.hour % 12;
+    final amPm = date.hour >= 12 ? 'PM' : 'AM';
+    return '${hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')} $amPm';
+  }
+
   void _shareImage(BuildContext context) async {
     try {
-      final file = File(widget.image.imagePath);
+      final file = File(_currentImagePath!);
       if (await file.exists()) {
         final xFile = XFile(file.path);
         final result = await Share.shareXFiles(
           [xFile],
-          subject: 'Image from Gallery',
-          text:
-              'Image captured at: ${widget.image.timestamp}\n'
-              'Location: ${widget.image.location?['latitude']?.toStringAsFixed(4)}, '
-              '${widget.image.location?['longitude']?.toStringAsFixed(4)}\n'
-              'Address: ${widget.image.address ?? "Not available"}',
+          subject: 'Image from SVS Timestamp',
+          text: _getShareText(),
         );
 
         if (result.status == ShareResultStatus.success) {
@@ -84,24 +358,26 @@ class _FullScreenImageViewerState extends State<FullScreenImageViewer> {
     }
   }
 
+  String _getShareText() {
+    final type = _isShowingOriginal ? 'Original' : 'Watermarked';
+    return '''
+$type Image from SVS Timestamp
+📅 ${_formatDate(widget.image.timestamp)} at ${_formatTime(widget.image.timestamp)}
+📍 ${widget.image.location != null ? '${widget.image.location!['latitude']!.toStringAsFixed(4)}, ${widget.image.location!['longitude']!.toStringAsFixed(4)}' : 'No location'}
+🏠 ${widget.image.address ?? 'No address'}
+    ''';
+  }
+
   Future<void> _saveImageToGallery(BuildContext context) async {
     try {
-      final file = File(widget.image.imagePath);
+      final file = File(_currentImagePath!);
       if (await file.exists()) {
         final result = await GallerySaver.saveImage(file.path);
 
         if (result == true) {
-          _showSnackBar(
-            context,
-            'Image saved to gallery successfully',
-            Colors.green,
-          );
+          _showSnackBar(context, 'Image saved to gallery', Colors.green);
         } else {
-          _showSnackBar(
-            context,
-            'Failed to save image to gallery',
-            Colors.orange,
-          );
+          _showSnackBar(context, 'Failed to save image', Colors.orange);
         }
       } else {
         _showSnackBar(context, 'Image file not found', Colors.orange);
@@ -109,7 +385,7 @@ class _FullScreenImageViewerState extends State<FullScreenImageViewer> {
     } on PlatformException catch (e) {
       _showSnackBar(
         context,
-        'Permission denied: $e\nPlease grant storage permission',
+        'Permission denied: Please grant storage permission',
         Colors.red,
       );
     } catch (e) {
@@ -120,62 +396,57 @@ class _FullScreenImageViewerState extends State<FullScreenImageViewer> {
   void _showMoreOptions(BuildContext context) {
     showModalBottomSheet(
       context: context,
+      backgroundColor: Colors.transparent,
       builder: (context) => Container(
-        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              leading: const Icon(Icons.edit),
-              title: const Text('Edit Image'),
-              onTap: () {
-                Navigator.pop(context);
-                _editImage(context);
-              },
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
+
+            if (widget.image.originalPath != null)
+              ListTile(
+                leading: Icon(
+                  _isShowingOriginal ? Icons.water_drop : Icons.image,
+                  color: _isShowingOriginal ? Colors.orange : Colors.blue,
+                ),
+                title: Text(
+                  _isShowingOriginal
+                      ? 'Switch to Watermarked'
+                      : 'Switch to Original',
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _toggleImageVersion();
+                },
+              ),
             ListTile(
-              leading: const Icon(Icons.copy),
-              title: const Text('Copy Details'),
-              onTap: () {
-                Navigator.pop(context);
-                _copyImageDetails(context);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete),
-              title: const Text('Delete Image'),
+              leading: const Icon(Icons.delete, color: Colors.red),
+              title: const Text(
+                'Delete Image',
+                style: TextStyle(color: Colors.red),
+              ),
               onTap: () {
                 Navigator.pop(context);
                 _deleteImage(context);
               },
             ),
+            const SizedBox(height: 20),
           ],
         ),
       ),
     );
-  }
-
-  void _editImage(BuildContext context) {
-    // Implement image editing functionality
-    _showSnackBar(context, 'Image editing coming soon', Colors.blue);
-  }
-
-  void _copyImageDetails(BuildContext context) async {
-    try {
-      final details =
-          'Image Details:\n'
-          'Timestamp: ${widget.image.timestamp}\n'
-          'Location: ${widget.image.location?['latitude']}, '
-          '${widget.image.location?['longitude']}\n'
-          'Address: ${widget.image.address ?? "Not available"}\n'
-          'Path: ${widget.image.imagePath}';
-
-      await Clipboard.setData(ClipboardData(text: details));
-
-      _showSnackBar(context, 'Image details copied to clipboard', Colors.green);
-    } catch (e) {
-      _showSnackBar(context, 'Failed to copy: $e', Colors.red);
-    }
   }
 
   void _deleteImage(BuildContext context) {
@@ -183,26 +454,55 @@ class _FullScreenImageViewerState extends State<FullScreenImageViewer> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Image'),
-        content: const Text('Are you sure you want to delete this image?'),
+        content: const Text(
+          'Are you sure you want to delete this image? This action cannot be undone.',
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancel'),
           ),
-          TextButton(
+          ElevatedButton(
             onPressed: () {
-              // Delete image file
-              final file = File(widget.image.imagePath);
-              if (file.existsSync()) {
-                file.deleteSync();
+              try {
+                // Delete watermarked image
+                final watermarkedFile = File(widget.image.imagePath);
+                if (watermarkedFile.existsSync()) {
+                  watermarkedFile.deleteSync();
+                }
+
+                // Delete original image if exists
+                if (widget.image.originalPath != null) {
+                  final originalFile = File(widget.image.originalPath!);
+                  if (originalFile.existsSync()) {
+                    originalFile.deleteSync();
+                  }
+                }
+
+                // Remove from storage
+                final storage = Provider.of<StorageService>(
+                  context,
+                  listen: false,
+                );
+                storage.capturedImages.removeWhere(
+                  (img) => img.id == widget.image.id,
+                );
+
+                Navigator.pop(context); // Close dialog
+                Navigator.pop(context); // Go back
+
+                _showSnackBar(context, 'Image deleted', Colors.orange);
+              } catch (e) {
+                Navigator.pop(context);
+                _showSnackBar(context, 'Failed to delete: $e', Colors.red);
               }
-
-              Navigator.pop(context);
-              Navigator.pop(context); // Go back to gallery
-
-              _showSnackBar(context, 'Image deleted successfully', Colors.red);
             },
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Delete'),
           ),
         ],
       ),
@@ -240,26 +540,36 @@ class _FullScreenImageViewerState extends State<FullScreenImageViewer> {
               ),
             ),
             const SizedBox(height: 20),
-            Text(
-              'Image Details',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+            Row(
+              children: [
+                Icon(
+                  _isShowingOriginal ? Icons.image : Icons.water_drop,
+                  color: _isShowingOriginal ? Colors.orange : Colors.blue,
+                  size: 28,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'Image Details',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             _buildDetailItem(
               context,
               Icons.access_time,
               'Captured Time',
-              widget.image.timestamp.toLocal().toString(),
+              '${_formatDate(widget.image.timestamp)} at ${_formatTime(widget.image.timestamp)}',
             ),
             if (widget.image.location != null)
               _buildDetailItem(
                 context,
                 Icons.location_on,
                 'GPS Coordinates',
-                '${widget.image.location!['latitude']!.toStringAsFixed(4)}, '
-                    '${widget.image.location!['longitude']!.toStringAsFixed(4)}',
+                '${widget.image.location!['latitude']!.toStringAsFixed(6)}, '
+                    '${widget.image.location!['longitude']!.toStringAsFixed(6)}',
               ),
             if (widget.image.address != null)
               _buildDetailItem(
@@ -268,12 +578,7 @@ class _FullScreenImageViewerState extends State<FullScreenImageViewer> {
                 'Address',
                 widget.image.address!,
               ),
-            _buildDetailItem(
-              context,
-              Icons.folder,
-              'File Path',
-              widget.image.imagePath,
-            ),
+
             const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
@@ -348,16 +653,23 @@ class _FullScreenImageViewerState extends State<FullScreenImageViewer> {
   void _showSnackBar(
     BuildContext context,
     String message,
-    Color backgroundColor,
-  ) {
+    Color backgroundColor, {
+    Duration duration = const Duration(seconds: 2),
+  }) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
         backgroundColor: backgroundColor,
-        duration: const Duration(seconds: 2),
+        duration: duration,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _toggleAnimController.dispose();
+    super.dispose();
   }
 }

@@ -362,16 +362,15 @@ class MetadataService {
     final double fontSizeDouble = prefs.getDouble('watermark_size') ?? 25.0;
     final int fontSize = fontSizeDouble.toInt();
     final int lineHeight = (fontSize * 1.4).toInt();
-    const int leftMargin = 50;
+    const int leftMargin = 40;
     const int bottomPadding = 40;
 
     final logoImage = await loadLogoImage();
     final logo = logoImage != null
         ? img.copyResize(
             logoImage,
-            width: 450, // Desired width
-            height: (450 * logoImage.height / logoImage.width)
-                .toInt(), // Maintain aspect ratio
+            width: (workingImage.width * 0.35).toInt(),
+            height: (workingImage.height * 0.15).toInt(),
             interpolation: img.Interpolation.linear,
           )
         : null;
@@ -396,12 +395,17 @@ class MetadataService {
 
     // Draw logo
     if (logo != null) {
-      final maxLogoHeight = workingImage.height - currentY - 20;
+      // final maxLogoHeight = workingImage.height - currentY - 20;
+      final maxLogoHeight = (workingImage.height - currentY - 10).clamp(
+        0,
+        workingImage.height,
+      );
 
       final logoToDraw = logo.height > maxLogoHeight
           ? img.copyResize(
               logo,
-              height: maxLogoHeight,
+              width: 550,
+              height: 550,
               interpolation: img.Interpolation.linear,
             )
           : logo;
@@ -409,7 +413,7 @@ class MetadataService {
       img.compositeImage(
         workingImage,
         logoToDraw,
-        dstX: leftMargin - 25,
+        dstX: leftMargin,
         dstY: currentY,
       );
 
@@ -439,7 +443,6 @@ class MetadataService {
     for (var line in wrappedAddressLines) {
       if (currentY + lineHeight > workingImage.height - 20) break;
 
-      // For Khmer text, we need to ensure it renders properly
       if (languageCode == 'km' && _containsKhmerText(line)) {
         workingImage = await _drawTextWithFlutter(
           workingImage,
@@ -449,15 +452,11 @@ class MetadataService {
           fontSize,
           isKhmer: true,
         );
-
-        // For Khmer text, the actual height might be larger due to complex characters
-        // So we need to adjust the Y position accordingly
-        final actualLineHeight = (lineHeight * 1.2).toInt();
-        currentY += actualLineHeight;
       } else {
         _drawText(workingImage, line, leftMargin, currentY, fontSize);
-        currentY += lineHeight;
       }
+
+      currentY += lineHeight;
     }
 
     // Draw location coordinates
@@ -513,13 +512,11 @@ class MetadataService {
       final uiImage = await _convertToUiImage(image);
       canvas.drawImage(uiImage, Offset.zero, Paint());
 
-      // For Khmer text, use a slightly larger line height
       final textStyle = TextStyle(
         fontSize: fontSize.toDouble(),
         color: color ?? Colors.white,
         fontFamily: isKhmer ? 'KantumruyPro' : null,
-        height: isKhmer ? 1.4 : 1.2, // Increased line height for Khmer
-        letterSpacing: isKhmer ? 0.5 : 0.0, // Better spacing for Khmer
+        height: 1.2,
       );
 
       final textSpan = TextSpan(text: text, style: textStyle);
@@ -528,7 +525,7 @@ class MetadataService {
         textDirection: TextDirection.ltr,
       );
 
-      textPainter.layout(maxWidth: image.width - x - 20); // Constrain width
+      textPainter.layout();
 
       if (shadow) {
         final shadowPainter = TextPainter(
@@ -538,7 +535,7 @@ class MetadataService {
           ),
           textDirection: TextDirection.ltr,
         );
-        shadowPainter.layout(maxWidth: image.width - x - 20);
+        shadowPainter.layout();
         shadowPainter.paint(canvas, Offset(x + 1.0, y + 1.0));
       }
 
@@ -551,6 +548,7 @@ class MetadataService {
       );
 
       if (byteData != null) {
+        // Create new image from raw RGBA data without compression
         final rgbaBytes = byteData.buffer.asUint8List();
         final newImage = img.Image.fromBytes(
           width: image.width,
@@ -600,12 +598,8 @@ class MetadataService {
     return completer.future;
   }
 
+  // Wrap text to fit within maxWidth
   static List<String> _wrapText(String text, int fontSize, int maxWidth) {
-    // For Khmer text, use a different approach since bitmap fonts don't support Khmer
-    if (_containsKhmerText(text)) {
-      return _wrapKhmerText(text, fontSize, maxWidth);
-    }
-
     final font = _getFontForSize(fontSize);
     final words = text.split(' ');
     final lines = <String>[];
@@ -632,50 +626,6 @@ class MetadataService {
           final part = currentLine.substring(0, cutIndex);
           lines.add(part);
           currentLine = currentLine.substring(cutIndex);
-        }
-      }
-    }
-
-    if (currentLine.isNotEmpty) {
-      lines.add(currentLine);
-    }
-
-    return lines;
-  }
-
-  // Special wrapping for Khmer text
-  static List<String> _wrapKhmerText(String text, int fontSize, int maxWidth) {
-    // Approximate character width for Khmer (roughly fontSize * 0.8 pixels per character)
-    final approxCharWidth = fontSize * 0.8;
-    final maxCharsPerLine = (maxWidth / approxCharWidth).floor();
-
-    final lines = <String>[];
-
-    // Split by words first (Khmer words are separated by spaces)
-    final words = text.split(' ');
-    String currentLine = '';
-
-    for (var word in words) {
-      final testLine = currentLine.isEmpty ? word : '$currentLine $word';
-
-      // Count characters in test line (approximate)
-      if (testLine.length <= maxCharsPerLine) {
-        currentLine = testLine;
-      } else {
-        if (currentLine.isNotEmpty) {
-          lines.add(currentLine);
-        }
-
-        // If word itself is too long, break it
-        if (word.length > maxCharsPerLine) {
-          String remainingWord = word;
-          while (remainingWord.length > maxCharsPerLine) {
-            lines.add(remainingWord.substring(0, maxCharsPerLine));
-            remainingWord = remainingWord.substring(maxCharsPerLine);
-          }
-          currentLine = remainingWord;
-        } else {
-          currentLine = word;
         }
       }
     }

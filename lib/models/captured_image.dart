@@ -7,6 +7,7 @@ class CapturedImage {
   final Map<String, dynamic> additionalData;
   final bool hasWatermark;
   final String? watermarkTemplate;
+  final String? originalPath; // Original image path
 
   CapturedImage({
     required this.id,
@@ -17,6 +18,7 @@ class CapturedImage {
     this.additionalData = const {},
     this.hasWatermark = true,
     this.watermarkTemplate,
+    this.originalPath,
   });
 
   Map<String, dynamic> toMap() {
@@ -29,6 +31,7 @@ class CapturedImage {
       'additionalData': additionalData,
       'hasWatermark': hasWatermark,
       'watermarkTemplate': watermarkTemplate,
+      'originalPath': originalPath,
     };
   }
 
@@ -44,6 +47,7 @@ class CapturedImage {
       additionalData: Map<String, dynamic>.from(map['additionalData']),
       hasWatermark: map['hasWatermark'] ?? true,
       watermarkTemplate: map['watermarkTemplate'],
+      originalPath: map['originalPath'],
     );
   }
 
@@ -57,6 +61,7 @@ class CapturedImage {
     Map<String, dynamic>? additionalData,
     bool? hasWatermark,
     String? watermarkTemplate,
+    String? originalPath,
   }) {
     return CapturedImage(
       id: id ?? this.id,
@@ -67,6 +72,7 @@ class CapturedImage {
       additionalData: additionalData ?? this.additionalData,
       hasWatermark: hasWatermark ?? this.hasWatermark,
       watermarkTemplate: watermarkTemplate ?? this.watermarkTemplate,
+      originalPath: originalPath ?? this.originalPath,
     );
   }
 }
