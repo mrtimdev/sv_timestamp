@@ -21,7 +21,8 @@ class CapturedImage {
     this.originalPath,
   });
 
-  Map<String, dynamic> toMap() {
+  // Convert to JSON for storage (used by StorageService)
+  Map<String, dynamic> toJson() {
     return {
       'id': id,
       'imagePath': imagePath,
@@ -35,20 +36,31 @@ class CapturedImage {
     };
   }
 
-  factory CapturedImage.fromMap(Map<String, dynamic> map) {
+  // Create from JSON (used by StorageService)
+  factory CapturedImage.fromJson(Map<String, dynamic> json) {
     return CapturedImage(
-      id: map['id'],
-      imagePath: map['imagePath'],
-      timestamp: DateTime.parse(map['timestamp']),
-      location: map['location'] != null
-          ? Map<String, double>.from(map['location'])
+      id: json['id'],
+      imagePath: json['imagePath'],
+      timestamp: DateTime.parse(json['timestamp']),
+      location: json['location'] != null
+          ? Map<String, double>.from(json['location'])
           : null,
-      address: map['address'],
-      additionalData: Map<String, dynamic>.from(map['additionalData']),
-      hasWatermark: map['hasWatermark'] ?? true,
-      watermarkTemplate: map['watermarkTemplate'],
-      originalPath: map['originalPath'],
+      address: json['address'],
+      additionalData: Map<String, dynamic>.from(json['additionalData']),
+      hasWatermark: json['hasWatermark'] ?? true,
+      watermarkTemplate: json['watermarkTemplate'],
+      originalPath: json['originalPath'],
     );
+  }
+
+  // Keep toMap for backward compatibility if needed
+  Map<String, dynamic> toMap() {
+    return toJson();
+  }
+
+  // Keep fromMap for backward compatibility if needed
+  factory CapturedImage.fromMap(Map<String, dynamic> map) {
+    return CapturedImage.fromJson(map);
   }
 
   // Copy with method for easier updates

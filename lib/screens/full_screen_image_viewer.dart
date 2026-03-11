@@ -1,10 +1,13 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:gallery_saver_plus/gallery_saver.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:photo_manager/photo_manager.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:flutter/services.dart';
+import 'package:svs_timestamp/constants/app_colors.dart';
 import '../models/captured_image.dart';
 import '../utils/storage_service.dart';
 import 'package:provider/provider.dart';
@@ -258,7 +261,7 @@ class _FullScreenImageViewerState extends State<FullScreenImageViewer>
             _buildActionButton(
               icon: Icons.share,
               label: 'Share',
-              onPressed: () => _shareImage(context),
+              onPressed: () => _shareImage(context as AssetEntity),
             ),
             _buildActionButton(
               icon: Icons.save_alt,
@@ -336,25 +339,89 @@ class _FullScreenImageViewerState extends State<FullScreenImageViewer>
     return '${hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')} $amPm';
   }
 
-  void _shareImage(BuildContext context) async {
+  Future<void> _shareImage(AssetEntity asset) async {
     try {
-      final file = File(_currentImagePath!);
-      if (await file.exists()) {
-        final xFile = XFile(file.path);
-        final result = await Share.shareXFiles(
-          [xFile],
-          subject: 'Image from SVS Timestamp',
-          text: _getShareText(),
-        );
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(color: AppColors.primaryBlue),
+        ),
+      );
 
-        if (result.status == ShareResultStatus.success) {
-          _showSnackBar(context, 'Image shared successfully', Colors.green);
+      // Try different methods to get the file
+      File? fileToShare;
+
+      // Method 1: Try origin file (best quality)
+      fileToShare = await asset.originFile;
+
+      // Method 2: Try regular file
+      if (fileToShare == null) {
+        fileToShare = await asset.file;
+      }
+
+      // Method 3: Try thumbnail as last resort
+      if (fileToShare == null) {
+        final thumbnailData = await asset.thumbnailDataWithSize(
+          const ThumbnailSize(1024, 1024),
+        );
+        if (thumbnailData != null) {
+          final tempDir = await getTemporaryDirectory();
+          final tempFile = File('${tempDir.path}/temp_${asset.id}.jpg');
+          await tempFile.writeAsBytes(thumbnailData);
+          fileToShare = tempFile;
+        }
+      }
+
+      // Close loading dialog
+      Navigator.pop(context);
+
+      if (fileToShare != null && await fileToShare.exists()) {
+        if (Platform.isIOS) {
+          // For iOS, always use a temporary file in a shared location
+          final tempDir = await getTemporaryDirectory();
+          final uniqueName =
+              'share_${DateTime.now().millisecondsSinceEpoch}.jpg';
+          final tempFile = File('${tempDir.path}/$uniqueName');
+
+          // Copy to temp location
+          await tempFile.writeAsBytes(await fileToShare.readAsBytes());
+
+          // Verify file exists and is readable
+          if (await tempFile.exists()) {
+            // Share from temp location
+            final result = await Share.shareXFiles([
+              XFile(tempFile.path),
+            ], text: 'Check out my photo!');
+
+            // Clean up temp file after sharing completes
+            tempFile.delete();
+          }
+        } else {
+          // Android - share directly
+          await Share.shareXFiles([
+            XFile(fileToShare.path),
+          ], text: 'Check out my photo!');
         }
       } else {
-        _showSnackBar(context, 'Image file not found', Colors.orange);
+        throw Exception('Could not access image file');
       }
     } catch (e) {
-      _showSnackBar(context, 'Failed to share: $e', Colors.red);
+      // Close loading dialog if open
+      if (mounted) {
+        Navigator.pop(context);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Could not share image'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+      print('Share error: $e');
     }
   }
 

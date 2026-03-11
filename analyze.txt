@@ -1,0 +1,52 @@
+Analyzing camera_screen.dart...                                 
+
+   info • The imported package 'path' isn't a dependency of the importing package • lib/screens/camera_screen.dart:5:8 • depend_on_referenced_packages
+warning • Unused import: 'package:provider/provider.dart' • lib/screens/camera_screen.dart:7:8 • unused_import
+warning • Unused import: '../utils/storage_service.dart' • lib/screens/camera_screen.dart:11:8 • unused_import
+warning • Unused import: '../constants/app_colors.dart' • lib/screens/camera_screen.dart:14:8 • unused_import
+warning • The value of the field '_isLocationReady' isn't used • lib/screens/camera_screen.dart:28:8 • unused_field
+  error • The getter 'file' isn't defined for the type 'MediaCapture' • lib/screens/camera_screen.dart:100:38 • undefined_getter
+   info • Don't invoke 'print' in production code • lib/screens/camera_screen.dart:149:7 • avoid_print
+  error • The named parameter 'onCaptureDone' isn't defined • lib/screens/camera_screen.dart:167:42 • undefined_named_parameter
+  error • The named parameter 'onPermissionsResult' isn't defined • lib/screens/camera_screen.dart:174:13 • undefined_named_parameter
+  error • The method 'when' isn't defined for the type 'MediaCapture' • lib/screens/camera_screen.dart:181:21 • undefined_method
+  error • The argument type 'Stack Function(CameraState, AnalysisPreview, dynamic)' can't be assigned to the parameter type 'CameraLayoutBuilder'.  • lib/screens/camera_screen.dart:198:22 • argument_type_not_assignable
+  error • The getter 'zoomLevel' isn't defined for the type 'PhotoCameraState' • lib/screens/camera_screen.dart:219:58 • undefined_getter
+  error • The getter 'zoomLevel' isn't defined for the type 'PhotoCameraState' • lib/screens/camera_screen.dart:224:56 • undefined_getter
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:259:39 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:285:28 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:286:28 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:292:50 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:295:35 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:350:53 • deprecated_member_use
+  error • The getter 'isTakingPicture' isn't defined for the type 'PhotoCameraState' • lib/screens/camera_screen.dart:361:26 • undefined_getter
+  error • The getter 'isTakingPicture' isn't defined for the type 'PhotoCameraState' • lib/screens/camera_screen.dart:370:32 • undefined_getter
+  error • The getter 'isTakingPicture' isn't defined for the type 'PhotoCameraState' • lib/screens/camera_screen.dart:374:30 • undefined_getter
+  error • The method 'switchSensor' isn't defined for the type 'PhotoCameraState' • lib/screens/camera_screen.dart:408:32 • undefined_method
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:423:53 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:468:53 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:520:31 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:522:50 • deprecated_member_use
+  error • The getter 'flashMode' isn't defined for the type 'CameraState' • lib/screens/camera_screen.dart:529:27 • undefined_getter
+  error • There's no constant named 'off' in 'FlashMode' • lib/screens/camera_screen.dart:529:50 • undefined_enum_constant
+  error • The getter 'flashMode' isn't defined for the type 'CameraState' • lib/screens/camera_screen.dart:531:27 • undefined_getter
+  error • The getter 'flashMode' isn't defined for the type 'CameraState' • lib/screens/camera_screen.dart:534:28 • undefined_getter
+  error • There's no constant named 'off' in 'FlashMode' • lib/screens/camera_screen.dart:534:51 • undefined_enum_constant
+  error • The argument type 'CameraState' can't be assigned to the parameter type 'PhotoCameraState'.  • lib/screens/camera_screen.dart:547:46 • argument_type_not_assignable
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:581:31 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:606:33 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:632:31 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:656:31 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:658:50 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:684:29 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:687:41 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:720:31 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:722:50 • deprecated_member_use
+  error • The getter 'flashMode' isn't defined for the type 'CameraState' • lib/screens/camera_screen.dart:730:28 • undefined_getter
+  error • There's no constant named 'off' in 'FlashMode' • lib/screens/camera_screen.dart:730:51 • undefined_enum_constant
+  error • The getter 'flashMode' isn't defined for the type 'CameraState' • lib/screens/camera_screen.dart:732:17 • undefined_getter
+  error • There's no constant named 'off' in 'FlashMode' • lib/screens/camera_screen.dart:734:21 • undefined_enum_constant
+  error • The method 'setFlashMode' isn't defined for the type 'CameraState' • lib/screens/camera_screen.dart:735:11 • undefined_method
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/screens/camera_screen.dart:747:50 • deprecated_member_use
+  error • The getter 'values' isn't defined for the type 'AwesomeFilter' • lib/screens/camera_screen.dart:764:39 • undefined_getter
+

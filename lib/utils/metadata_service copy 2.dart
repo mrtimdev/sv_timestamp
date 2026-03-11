@@ -16,7 +16,7 @@ class MetadataService {
   static String? _customLogoBase64;
   static String _appTitle = '';
 
-  static double? _watermarkSize = 60.0;
+  static double? _watermarkSize;
 
   static String get appTitle => _appTitle;
 
@@ -359,20 +359,18 @@ class MetadataService {
     }
 
     final prefs = await SharedPreferences.getInstance();
-    final double fontSizeDouble = prefs.getDouble('watermark_size') ?? 60.0;
+    final double fontSizeDouble = prefs.getDouble('watermark_size') ?? 25.0;
     final int fontSize = fontSizeDouble.toInt();
     final int lineHeight = (fontSize * 1.4).toInt();
     const int leftMargin = 50;
     const int bottomPadding = 40;
 
-    print("printing fontsize: $fontSizeDouble");
-
     final logoImage = await loadLogoImage();
     final logo = logoImage != null
         ? img.copyResize(
             logoImage,
-            width: 550, // Desired width
-            height: (550 * logoImage.height / logoImage.width)
+            width: 450, // Desired width
+            height: (450 * logoImage.height / logoImage.width)
                 .toInt(), // Maintain aspect ratio
             interpolation: img.Interpolation.linear,
           )

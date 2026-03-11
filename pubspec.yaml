@@ -35,6 +35,13 @@ dependencies:
   geocoding_ios: ^3.1.0
   google_maps_flutter: ^2.14.2
   native_device_orientation: ^2.1.0
+  flutter_animate: ^4.5.2
+  file_picker: ^10.3.10
+  photo_manager: ^3.9.0
+  device_info_plus: ^12.3.0
+  camerawesome: ^2.5.0
+  sensors_plus: ^7.0.0
+  open_filex: ^4.7.0
 
   # gallery_saver: ^2.3.2
 

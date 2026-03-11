@@ -13,11 +13,13 @@ import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:gallery_saver_plus/gallery_saver.dart';
 import 'package:svs_timestamp/l10n/app_localizations.dart';
 import 'package:svs_timestamp/screens/SettingsScreen.dart';
 import 'package:svs_timestamp/screens/gallery_screen.dart';
 import 'package:vibration/vibration.dart';
 import 'package:svs_timestamp/models/captured_image.dart';
+import 'package:photo_manager/photo_manager.dart';
 import '../utils/metadata_service.dart';
 import '../utils/storage_service.dart';
 
@@ -46,11 +48,14 @@ class _CameraScreenState extends State<CameraScreen>
   // Camera settings
   int _cameraIndex = 0;
   FlashMode _flashMode = FlashMode.auto;
+
+  // Zoom - FIXED: Better zoom management
   double _zoom = 1.0;
   double _minZoom = 1.0;
-  double _maxZoom = 10.0;
+  double _maxZoom = 1.0;
   bool _isZooming = false;
   double _baseZoom = 1.0;
+  bool _zoomSupported = true;
 
   // Focus ring
   bool _showFocusRing = false;
@@ -68,7 +73,6 @@ class _CameraScreenState extends State<CameraScreen>
   bool _vibrateOn = true;
   String _quality = 'High';
   double _watermarkSize = 25.0;
-  bool _keepOriginal = true;
 
   // Animation
   late AnimationController _captureAnim;
@@ -85,6 +89,83 @@ class _CameraScreenState extends State<CameraScreen>
 
   // Add a flag to track if camera is initializing
   bool _isCameraInitializing = false;
+
+  // Track latest thumbnail from native gallery
+  File? _latestThumbnail;
+
+  // FIXED: Flag to track if we're switching cameras
+  bool _isSwitchingCamera = false;
+
+  Future<void> _loadLatestThumbnail() async {
+    try {
+      final permission = await PhotoManager.requestPermissionExtend();
+      if (permission.isAuth || permission.hasAccess) {
+        final filterOption = FilterOptionGroup(
+          orders: [
+            const OrderOption(type: OrderOptionType.createDate, asc: false),
+          ],
+        );
+
+        final albums = await PhotoManager.getAssetPathList(
+          type: RequestType.image,
+          hasAll: true,
+          filterOption: filterOption,
+        );
+        for (var a in albums) {
+          if (a.name == 'SVS-Watermark-Camera') {
+            final assets = await a.getAssetListPaged(page: 0, size: 1);
+            if (assets.isNotEmpty) {
+              final file = await assets.first.file;
+              if (file != null && await file.exists()) {
+                print('Native PhotoManager thumbnail found: ${file.path}');
+                if (mounted) setState(() => _latestThumbnail = file);
+                return;
+              }
+            }
+          }
+        }
+      }
+
+      // Fallback
+      if (Platform.isAndroid) {
+        final dirs = [
+          Directory('/storage/emulated/0/Pictures/SVS-Watermark-Camera'),
+          Directory('/storage/emulated/0/DCIM/SVS-Watermark-Camera'),
+        ];
+        List<File> images = [];
+        for (var d in dirs) {
+          if (await d.exists()) {
+            images.addAll(
+              d.listSync().whereType<File>().where(
+                (f) =>
+                    f.path.toLowerCase().endsWith('.jpg') ||
+                    f.path.toLowerCase().endsWith('.jpeg') ||
+                    f.path.toLowerCase().endsWith('.png'),
+              ),
+            );
+          }
+        }
+        if (images.isNotEmpty) {
+          images.sort((a, b) {
+            try {
+              return b.lastModifiedSync().compareTo(a.lastModifiedSync());
+            } catch (_) {
+              return 0;
+            }
+          });
+          print('Fallback thumbnail found: ${images.first.path}');
+          if (mounted) setState(() => _latestThumbnail = images.first);
+        } else {
+          print('Fallback thumbnail: No images found');
+          if (mounted) setState(() => _latestThumbnail = null);
+        }
+      } else {
+        if (mounted) setState(() => _latestThumbnail = null);
+      }
+    } catch (e) {
+      print('Thumbnail load error: $e');
+    }
+  }
 
   @override
   void initState() {
@@ -112,6 +193,7 @@ class _CameraScreenState extends State<CameraScreen>
       await _loadPrefs();
       await _initLocation();
       await _initCamera();
+      await _loadLatestThumbnail();
     } catch (e) {
       print('Init error: $e');
     } finally {
@@ -128,7 +210,6 @@ class _CameraScreenState extends State<CameraScreen>
       _vibrateOn = _prefs.getBool('vibration_on_capture') ?? true;
       _quality = _prefs.getString('image_quality') ?? 'High';
       _watermarkSize = _prefs.getDouble('watermark_size') ?? 25.0;
-      _keepOriginal = _prefs.getBool('keep_original') ?? true;
 
       final title = _prefs.getString('app_title');
       if (title?.isNotEmpty == true) MetadataService.setAppTitle(title!);
@@ -196,9 +277,12 @@ class _CameraScreenState extends State<CameraScreen>
 
       await _disposeController();
 
-      // Reset zoom before creating controller
+      // FIXED: Reset zoom to safe defaults before creating controller
       _zoom = 1.0;
       _baseZoom = 1.0;
+      _minZoom = 1.0;
+      _maxZoom = 1.0;
+      _zoomSupported = true;
 
       _controller = CameraController(
         _cameras[_cameraIndex],
@@ -219,12 +303,16 @@ class _CameraScreenState extends State<CameraScreen>
 
       _isControllerInitialized = true;
 
+      // FIXED: Configure zoom after camera is initialized
+      await _configureZoom();
+
       await _configureCamera();
 
       if (mounted && !_isDisposed && !_isNavigatingAway) {
         setState(() {
           _isCameraReady = true;
           _cameraError = '';
+          _isSwitchingCamera = false;
         });
       }
     } on CameraException catch (e) {
@@ -235,6 +323,36 @@ class _CameraScreenState extends State<CameraScreen>
       _handleCameraError('Camera initialization failed: $e');
     } finally {
       _isCameraInitializing = false;
+    }
+  }
+
+  // FIXED: Separate method for zoom configuration
+  Future<void> _configureZoom() async {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+
+    try {
+      _minZoom = await _controller!.getMinZoomLevel();
+      _maxZoom = await _controller!.getMaxZoomLevel();
+
+      // Ensure zoom values are valid
+      if (_minZoom < 1.0) _minZoom = 1.0;
+      if (_maxZoom < _minZoom) _maxZoom = _minZoom;
+
+      _zoom = _minZoom;
+      _baseZoom = _minZoom;
+
+      // Set initial zoom level
+      await _controller!.setZoomLevel(_zoom);
+      _zoomSupported = true;
+
+      print('Zoom configured: min=$_minZoom, max=$_maxZoom, current=$_zoom');
+    } catch (e) {
+      print('Zoom not supported on this camera: $e');
+      _zoomSupported = false;
+      _minZoom = 1.0;
+      _maxZoom = 1.0;
+      _zoom = 1.0;
+      _baseZoom = 1.0;
     }
   }
 
@@ -254,6 +372,7 @@ class _CameraScreenState extends State<CameraScreen>
       setState(() {
         _cameraError = error;
         _isCameraReady = false;
+        _isSwitchingCamera = false;
       });
     }
   }
@@ -262,19 +381,6 @@ class _CameraScreenState extends State<CameraScreen>
     if (_controller == null || !_controller!.value.isInitialized) return;
 
     try {
-      try {
-        _minZoom = await _controller!.getMinZoomLevel();
-        _maxZoom = await _controller!.getMaxZoomLevel();
-        // Ensure zoom is within bounds and set explicitly
-        _zoom = _zoom.clamp(_minZoom, _maxZoom);
-        await _controller!.setZoomLevel(_zoom);
-      } catch (e) {
-        print('Zoom not supported: $e');
-        _minZoom = 1.0;
-        _maxZoom = 1.0;
-        _zoom = 1.0;
-      }
-
       await _controller!.setFocusMode(FocusMode.auto);
       await _controller!.setExposureMode(ExposureMode.auto);
       await _controller!.setFlashMode(_flashMode);
@@ -324,15 +430,65 @@ class _CameraScreenState extends State<CameraScreen>
         _isControllerInitialized &&
         _isCameraReady &&
         !_isDisposed &&
-        !_isNavigatingAway;
+        !_isNavigatingAway &&
+        !_isSwitchingCamera;
+  }
+
+  Future<void> _saveToDeviceGallery(File image) async {
+    try {
+      // Ensure the file exists and is readable
+      if (!await image.exists()) {
+        print('File does not exist: ${image.path}');
+        return;
+      }
+
+      // Wait a tiny bit to ensure file is fully written
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      // Verify we can read the file
+      final fileStat = await image.stat();
+      print('File size: ${fileStat.size} bytes');
+
+      if (fileStat.size == 0) {
+        print('File is empty');
+        return;
+      }
+
+      // Save to device gallery
+      final result = await GallerySaver.saveImage(
+        image.path,
+        albumName: 'SVS-Watermark-Camera',
+      );
+
+      if (result == true && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('✓ Saved to gallery'),
+            backgroundColor: Colors.green,
+            duration: const Duration(milliseconds: 1500),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error saving to gallery: $e');
+      // Don't show error to user - it's not critical
+    }
   }
 
   Future<void> _takePicture() async {
     if (!_canTakePicture()) return;
 
+    // Add a safety check for controller
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+
     try {
-      await _controller!.setFocusMode(FocusMode.auto);
-      await _controller!.setExposureMode(ExposureMode.auto);
+      await controller.setFocusMode(FocusMode.auto);
+      await controller.setExposureMode(ExposureMode.auto);
     } catch (e) {
       print('Focus/Exposure error: $e');
     }
@@ -356,8 +512,10 @@ class _CameraScreenState extends State<CameraScreen>
     }
 
     try {
-      final image = await _controller!.takePicture();
+      // Take picture
+      final image = await controller.takePicture();
 
+      // Create temp file
       final tempDir = await getTemporaryDirectory();
       final tempPath = path.join(
         tempDir.path,
@@ -367,49 +525,40 @@ class _CameraScreenState extends State<CameraScreen>
       await File(image.path).rename(tempPath);
 
       final timestamp = DateTime.now();
-      final loc = AppLocalizations.of(context)!;
+      final loc = mounted ? AppLocalizations.of(context) : null;
 
-      final originalBytes = await File(tempPath).readAsBytes();
+      // Read image bytes
+      final imageBytes = await File(tempPath).readAsBytes();
 
-      final appDir = await getApplicationDocumentsDirectory();
-      final captureDir = path.join(appDir.path, 'captured_images');
-      final fileName = 'IMG_${timestamp.millisecondsSinceEpoch}';
-
-      String? originalPath;
-      if (_keepOriginal) {
-        originalPath = path.join(captureDir, 'original', '$fileName.jpg');
-        await Directory(path.dirname(originalPath)).create(recursive: true);
-        await File(originalPath).writeAsBytes(originalBytes);
-      }
-
+      // Add metadata watermark
       final processed = await MetadataService.addMetadataToImage(
-        originalBytes,
+        imageBytes,
         timestamp,
         _coords,
         _address,
-        locationLabel: loc.locationLabel,
-        addressLabel: loc.addressLabel,
-        datetimeLabel: loc.datetimeLabel,
+        locationLabel: loc?.locationLabel ?? 'Location:',
+        addressLabel: loc?.addressLabel ?? 'Address:',
+        datetimeLabel: loc?.datetimeLabel ?? 'Date:',
       );
 
-      final watermarkedPath = path.join(
-        captureDir,
-        'watermarked',
-        '$fileName.jpg',
+      // Create final file in temporary directory first
+      final finalTempPath = path.join(
+        tempDir.path,
+        'watermarked_${timestamp.millisecondsSinceEpoch}.jpg',
       );
-      await Directory(path.dirname(watermarkedPath)).create(recursive: true);
-      await File(watermarkedPath).writeAsBytes(processed);
+      await File(finalTempPath).writeAsBytes(processed);
 
+      // Clean up temp files
       if (await File(tempPath).exists()) {
         await File(tempPath).delete();
       }
 
+      // Update storage service for gallery thumbnails
       _storageService.capturedImages.insert(
         0,
         CapturedImage(
           id: timestamp.millisecondsSinceEpoch.toString(),
-          imagePath: watermarkedPath,
-          originalPath: originalPath,
+          imagePath: finalTempPath,
           timestamp: timestamp,
           location: _coords,
           address: _address,
@@ -421,14 +570,23 @@ class _CameraScreenState extends State<CameraScreen>
         ),
       );
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✓ Captured...'),
-            backgroundColor: Colors.green,
-            duration: Duration(milliseconds: 800),
-          ),
-        );
+      // Verify file was written
+      final finalFile = File(finalTempPath);
+      if (await finalFile.exists()) {
+        print('Watermarked image created: ${finalFile.path}');
+
+        // Save directly to device gallery
+        await _saveToDeviceGallery(finalFile);
+
+        // Immediately update thumbnail for instant UI gratification
+        if (mounted) {
+          setState(() {
+            _latestThumbnail = finalFile;
+          });
+        }
+
+        // Refresh thumbnail reliably in the background
+        Future.delayed(const Duration(seconds: 2), _loadLatestThumbnail);
       }
     } catch (e) {
       print('Capture error: $e');
@@ -440,6 +598,7 @@ class _CameraScreenState extends State<CameraScreen>
               'Failed: ${errorMsg.substring(0, min(50, errorMsg.length))}',
             ),
             backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
@@ -451,11 +610,28 @@ class _CameraScreenState extends State<CameraScreen>
     }
   }
 
-  Future<void> _switchCamera() async {
-    if (_cameras.length < 2 || _isCapturing || _isCameraInitializing) return;
+  // Add this helper method to safely access the controller
+  CameraController? _getSafeController() {
+    if (_controller != null &&
+        _controller!.value.isInitialized &&
+        !_isDisposed &&
+        !_isNavigatingAway &&
+        !_isSwitchingCamera) {
+      return _controller;
+    }
+    return null;
+  }
 
+  // FIXED: Improved camera switching with proper zoom reset
+  Future<void> _switchCamera() async {
+    if (_cameras.length < 2 ||
+        _isCapturing ||
+        _isCameraInitializing ||
+        _isSwitchingCamera)
+      return;
+
+    _isSwitchingCamera = true;
     _zoomDebounceTimer?.cancel();
-    _isCameraInitializing = true;
 
     // Update UI to show loading state
     setState(() {
@@ -464,6 +640,8 @@ class _CameraScreenState extends State<CameraScreen>
       _isZooming = false;
       _zoom = 1.0;
       _baseZoom = 1.0;
+      _minZoom = 1.0;
+      _maxZoom = 1.0;
     });
 
     try {
@@ -490,29 +668,17 @@ class _CameraScreenState extends State<CameraScreen>
 
       _isControllerInitialized = true;
 
-      // Configure camera settings
-      try {
-        _minZoom = await _controller!.getMinZoomLevel();
-        _maxZoom = await _controller!.getMaxZoomLevel();
-        _zoom = _minZoom > 1.0 ? _minZoom : 1.0;
-        _baseZoom = _zoom;
-        await _controller!.setZoomLevel(_zoom);
-      } catch (e) {
-        print('Zoom not supported on this camera: $e');
-        _minZoom = 1.0;
-        _maxZoom = 1.0;
-        _zoom = 1.0;
-        _baseZoom = 1.0;
-      }
+      // FIXED: Configure zoom after initialization
+      await _configureZoom();
 
-      await _controller!.setFocusMode(FocusMode.auto);
-      await _controller!.setExposureMode(ExposureMode.auto);
-      await _controller!.setFlashMode(_flashMode);
+      // Configure other camera settings
+      await _configureCamera();
 
       if (mounted && !_isDisposed && !_isNavigatingAway) {
         setState(() {
           _isCameraReady = true;
           _cameraError = '';
+          _isSwitchingCamera = false;
         });
       }
     } catch (e) {
@@ -521,15 +687,15 @@ class _CameraScreenState extends State<CameraScreen>
         setState(() {
           _cameraError = 'Failed to switch camera: $e';
           _isCameraReady = false;
+          _isSwitchingCamera = false;
         });
       }
-    } finally {
-      _isCameraInitializing = false;
     }
   }
 
   void _toggleFlash() async {
-    if (!_canInteractWithCamera()) return;
+    final controller = _getSafeController();
+    if (controller == null) return;
 
     try {
       const modes = [
@@ -542,7 +708,7 @@ class _CameraScreenState extends State<CameraScreen>
       final nextIndex = (currentIndex + 1) % modes.length;
       final newMode = modes[nextIndex];
 
-      await _controller!.setFlashMode(newMode);
+      await controller.setFlashMode(newMode);
       if (mounted) setState(() => _flashMode = newMode);
     } catch (e) {
       print('Flash error: $e');
@@ -555,28 +721,38 @@ class _CameraScreenState extends State<CameraScreen>
         _isCameraReady &&
         !_isCapturing &&
         !_isDisposed &&
-        !_isNavigatingAway;
+        !_isNavigatingAway &&
+        !_isSwitchingCamera;
   }
 
+  // FIXED: Improved zoom handling with better safety checks
   void _onScaleStart(ScaleStartDetails details) {
-    if (!_canInteractWithCamera()) return;
+    if (!_canInteractWithCamera() || !_zoomSupported) return;
     _baseZoom = _zoom;
     setState(() => _isZooming = true);
   }
 
   void _onScaleUpdate(ScaleUpdateDetails details) async {
-    if (!_canInteractWithCamera() || _controller == null) return;
+    if (!_canInteractWithCamera() || !_zoomSupported) return;
+
+    final controller = _getSafeController();
+    if (controller == null) return;
 
     try {
-      double zoom = (_baseZoom * details.scale).clamp(_minZoom, _maxZoom);
+      // Calculate new zoom with safety bounds
+      double zoom = _baseZoom * details.scale;
+      zoom = zoom.clamp(_minZoom, _maxZoom);
+
+      // Only update if change is significant
       if ((zoom - _zoom).abs() > 0.01) {
-        await _controller!.setZoomLevel(zoom);
+        await controller.setZoomLevel(zoom);
         if (mounted && !_isDisposed) {
           setState(() => _zoom = zoom);
         }
       }
     } catch (e) {
       print('Zoom error: $e');
+      setState(() => _isZooming = false);
     }
   }
 
@@ -585,7 +761,8 @@ class _CameraScreenState extends State<CameraScreen>
   }
 
   void _onFocusTap(TapUpDetails details) {
-    if (!_canInteractWithCamera() || _controller == null) return;
+    final controller = _getSafeController();
+    if (controller == null) return;
 
     final box = context.findRenderObject() as RenderBox;
     final localPosition = box.globalToLocal(details.globalPosition);
@@ -607,8 +784,8 @@ class _CameraScreenState extends State<CameraScreen>
     });
 
     try {
-      _controller!.setFocusPoint(Offset(x, y));
-      _controller!.setExposurePoint(Offset(x, y));
+      controller.setFocusPoint(Offset(x, y));
+      controller.setExposurePoint(Offset(x, y));
     } catch (e) {
       print('Focus error: $e');
     }
@@ -642,7 +819,6 @@ class _CameraScreenState extends State<CameraScreen>
       fit: StackFit.expand,
       children: [
         _buildPreview(),
-
         if (_showFocusRing)
           Positioned(
             left: _focusPosition.dx - 40,
@@ -672,7 +848,6 @@ class _CameraScreenState extends State<CameraScreen>
               ),
             ),
           ),
-
         SafeArea(
           child: _currentOrientation == Orientation.portrait
               ? _buildPortraitUI()
@@ -687,16 +862,17 @@ class _CameraScreenState extends State<CameraScreen>
     if (_controller == null ||
         !_controller!.value.isInitialized ||
         !_isCameraReady ||
-        _isCameraInitializing) {
+        _isCameraInitializing ||
+        _isSwitchingCamera) {
       return _buildLoading();
     }
 
     // Full-screen camera preview with proper scaling
     return GestureDetector(
       onTapUp: _onFocusTap,
-      onScaleStart: _onScaleStart,
-      onScaleUpdate: _onScaleUpdate,
-      onScaleEnd: _onScaleEnd,
+      onScaleStart: _zoomSupported ? _onScaleStart : null,
+      onScaleUpdate: _zoomSupported ? _onScaleUpdate : null,
+      onScaleEnd: _zoomSupported ? _onScaleEnd : null,
       behavior: HitTestBehavior.opaque,
       child: Container(
         width: double.infinity,
@@ -717,9 +893,11 @@ class _CameraScreenState extends State<CameraScreen>
             const CircularProgressIndicator(color: Colors.white),
             const SizedBox(height: 20),
             Text(
-              _isCameraInitializing
+              _isSwitchingCamera
                   ? 'Switching camera...'
-                  : 'Initializing camera...',
+                  : (_isCameraInitializing
+                        ? 'Initializing camera...'
+                        : 'Loading camera...'),
               style: const TextStyle(color: Colors.white),
             ),
           ],
@@ -730,6 +908,8 @@ class _CameraScreenState extends State<CameraScreen>
 
   // Modern iOS-style frosted glass top bar
   Widget _buildTopBar() {
+    final canInteract = _canInteractWithCamera();
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
       child: BackdropFilter(
@@ -755,13 +935,17 @@ class _CameraScreenState extends State<CameraScreen>
                 enabled:
                     _cameras.length > 1 &&
                     !_isCapturing &&
-                    !_isCameraInitializing,
+                    !_isCameraInitializing &&
+                    !_isSwitchingCamera,
               ),
               const SizedBox(width: 16),
               _iconButton(
                 Icons.settings_outlined,
                 _navigateToSettings,
-                enabled: !_isCapturing && !_isCameraInitializing,
+                enabled:
+                    !_isCapturing &&
+                    !_isCameraInitializing &&
+                    !_isSwitchingCamera,
               ),
             ],
           ),
@@ -841,7 +1025,10 @@ class _CameraScreenState extends State<CameraScreen>
                 _iconButton(
                   Icons.brush_outlined,
                   _showWatermarkSettings,
-                  enabled: !_isCapturing && !_isCameraInitializing,
+                  enabled:
+                      !_isCapturing &&
+                      !_isCameraInitializing &&
+                      !_isSwitchingCamera,
                 ),
               ],
             ),
@@ -861,7 +1048,7 @@ class _CameraScreenState extends State<CameraScreen>
           child: Align(alignment: Alignment.topCenter, child: _buildTopBar()),
         ),
 
-        if (_isZooming) Center(child: _buildZoomIndicator()),
+        if (_isZooming && _zoomSupported) Center(child: _buildZoomIndicator()),
 
         // Bottom frosted panel
         _buildBottomPanel(),
@@ -895,9 +1082,8 @@ class _CameraScreenState extends State<CameraScreen>
                 child: _buildTopBar(),
               ),
             ),
-
-            if (_isZooming) Center(child: _buildZoomIndicator()),
-
+            if (_isZooming && _zoomSupported)
+              Center(child: _buildZoomIndicator()),
             _buildBottomPanel(),
           ],
         ),
@@ -933,10 +1119,10 @@ class _CameraScreenState extends State<CameraScreen>
   }
 
   Widget _galleryThumb() {
-    final hasImages = _storageService.capturedImages.isNotEmpty;
+    final hasImages = _latestThumbnail != null;
 
     return GestureDetector(
-      onTap: hasImages ? _showGallery : null,
+      onTap: _showGallery, // Always allow tapping to view gallery
       child: Container(
         width: 48,
         height: 48,
@@ -952,13 +1138,10 @@ class _CameraScreenState extends State<CameraScreen>
           borderRadius: BorderRadius.circular(10),
           child: hasImages
               ? Image.file(
-                  File(_storageService.capturedImages.first.imagePath),
+                  _latestThumbnail!,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Icon(
-                    Icons.photo_library,
-                    color: hasImages ? Colors.white : Colors.white30,
-                    size: 24,
-                  ),
+                  errorBuilder: (_, __, ___) =>
+                      Icon(Icons.photo_library, color: Colors.white, size: 24),
                 )
               : Icon(Icons.photo_library, color: Colors.white30, size: 24),
         ),
@@ -1040,14 +1223,23 @@ class _CameraScreenState extends State<CameraScreen>
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 20),
-          ElevatedButton(onPressed: _initCamera, child: const Text('Retry')),
+          ElevatedButton(
+            onPressed: () {
+              setState(() {
+                _cameraError = '';
+                _isCameraReady = false;
+              });
+              _initCamera();
+            },
+            child: const Text('Retry'),
+          ),
         ],
       ),
     );
   }
 
   void _navigateToSettings() async {
-    if (_isNavigatingAway || _isCapturing) return;
+    if (_isNavigatingAway || _isCapturing || _isSwitchingCamera) return;
 
     _isNavigatingAway = true;
 
@@ -1068,7 +1260,7 @@ class _CameraScreenState extends State<CameraScreen>
   }
 
   void _showWatermarkSettings() {
-    if (!mounted || _isCapturing) return;
+    if (!mounted || _isCapturing || _isSwitchingCamera) return;
 
     double tempSize = _watermarkSize;
 
@@ -1137,21 +1329,18 @@ class _CameraScreenState extends State<CameraScreen>
   }
 
   void _showGallery() async {
-    if (_storageService.capturedImages.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('No photos yet')));
-      return;
-    }
-
-    if (_isNavigatingAway) return;
+    if (_isNavigatingAway || _isSwitchingCamera) return;
 
     _isNavigatingAway = true;
     await _disposeController();
 
     if (!mounted) return;
 
-    GalleryScreenBottomSheet.show(context);
+    // Navigate to GalleryScreen
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const GalleryScreen()),
+    );
 
     if (mounted) {
       _isNavigatingAway = false;
@@ -1180,6 +1369,7 @@ class _CameraScreenState extends State<CameraScreen>
         if (_controller == null || !_controller!.value.isInitialized) {
           _initCamera();
         }
+        _loadLatestThumbnail();
         break;
       case AppLifecycleState.paused:
       case AppLifecycleState.inactive:

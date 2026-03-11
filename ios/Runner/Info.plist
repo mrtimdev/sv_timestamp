@@ -19,34 +19,40 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.1</string>
+	<string>1.0.8</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>8</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>This app requires camera access to allow users to capture photos with date, time, and GPS location information displayed directly on the image for verification and record-keeping purposes.</string>
+	<string>This app requires camera access to capture photos with date, time, and GPS location information displayed on the image.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>This app requires microphone access when recording videos with timestamp and location overlay.</string>
-
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>This app needs to save photos to your gallery</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>This app uses your location to display the current GPS address and coordinates on the captured photo along with the timestamp. The location is only used when taking a photo and is not stored or shared.</string>
-
+	<string>This app needs to save photos to your gallery.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>This app needs photo library access to save images</string>
+	<string>This app needs photo library access to save images.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>This app uses your location to display GPS address and coordinates on photos.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>This app uses GPS to stamp location on photos.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>This app requires access to the barometer to provide altitude information.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
-	
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>UISupportsDocumentBrowser</key>
+	<true/>
+	<key>UIFileSharingEnabled</key>
+	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
 	<key>UISupportedInterfaceOrientations</key>
-	
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>

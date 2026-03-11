@@ -1,4 +1,3 @@
-// lib/screens/gallery_screen.dart (updated with checkbox selection)
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
@@ -11,9 +10,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:svs_timestamp/screens/new_custom_camera.dart';
 import '../constants/app_colors.dart';
-import 'full_screen.dart'; // Import the new full screen
 
 class GalleryScreen extends StatefulWidget {
   final AssetEntity? initialAsset;
@@ -33,10 +30,6 @@ class _GalleryScreenState extends State<GalleryScreen>
   bool _isDeleting = false;
   bool _hasPermission = false;
   String? _selectedAssetId;
-
-  // Selected images for multi-select
-  Set<String> _selectedAssetIds = {};
-  bool _isSelectionMode = false;
 
   // Selected image index for preview (global index)
   int? _selectedImageIndex;
@@ -192,8 +185,6 @@ class _GalleryScreenState extends State<GalleryScreen>
       _hasMore = true;
       _groupedAssets = {};
       _dateGroups = [];
-      _selectedAssetIds.clear();
-      _isSelectionMode = false;
     });
     await _loadTargetAlbum();
     await _loadImages(reset: true);
@@ -373,7 +364,7 @@ class _GalleryScreenState extends State<GalleryScreen>
     if (globalIndex != -1) {
       // Found in current loaded assets
       _selectedImageIndex = globalIndex;
-      _navigateToFullScreen(globalIndex);
+      _showImagePreview(allAssets[globalIndex], globalIndex);
     } else {
       // Need to load more pages to find it
       bool found = false;
@@ -392,10 +383,10 @@ class _GalleryScreenState extends State<GalleryScreen>
           // Scroll to the image
           _scrollToAsset(globalIndex);
 
-          // Navigate to full screen after a short delay
+          // Show preview after a short delay
           Future.delayed(const Duration(milliseconds: 500), () {
             if (mounted) {
-              _navigateToFullScreen(globalIndex);
+              _showImagePreview(allAssets[globalIndex], globalIndex);
             }
           });
         }
@@ -462,79 +453,12 @@ class _GalleryScreenState extends State<GalleryScreen>
     }
   }
 
-  // Handle image tap - either select or view
-  void _handleImageTap(AssetEntity asset, int globalIndex) {
-    if (_isSelectionMode) {
-      _toggleSelection(asset.id);
-    } else {
-      _navigateToFullScreen(globalIndex);
-    }
-  }
-
-  // Handle long press - enter selection mode
-  void _handleImageLongPress(String assetId) {
-    if (!_isSelectionMode) {
-      setState(() {
-        _isSelectionMode = true;
-        _selectedAssetIds.add(assetId);
-      });
-    }
-  }
-
-  // Toggle selection for an asset
-  void _toggleSelection(String assetId) {
-    setState(() {
-      if (_selectedAssetIds.contains(assetId)) {
-        _selectedAssetIds.remove(assetId);
-        if (_selectedAssetIds.isEmpty) {
-          _isSelectionMode = false;
-        }
-      } else {
-        _selectedAssetIds.add(assetId);
-      }
-    });
-  }
-
-  // Navigate to full screen gallery
-  void _navigateToFullScreen(int initialIndex) {
-    List<AssetEntity> allAssets = _groupedAssets.values
-        .expand((e) => e)
-        .toList();
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => FullScreenGallery(
-          assets: allAssets,
-          initialIndex: initialIndex,
-          onDelete: (deletedAsset) {
-            // Handle deletion - refresh gallery
-            _refreshGallery();
-          },
-          onShare: (sharedAsset) {
-            // Optional: track shares
-            print('Shared: ${sharedAsset.id}');
-          },
-          onSave: (savedAsset) {
-            // Optional: track saves
-            print('Saved: ${savedAsset.id}');
-          },
-        ),
-      ),
-    );
-  }
-
-  // Delete selected images
-  Future<void> _deleteSelectedImages() async {
-    if (_selectedAssetIds.isEmpty) return;
-
+  Future<void> _deleteImage(AssetEntity asset) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Delete ${_selectedAssetIds.length} Images'),
-        content: Text(
-          'Are you sure you want to delete ${_selectedAssetIds.length} image${_selectedAssetIds.length > 1 ? 's' : ''}?',
-        ),
+        title: const Text('Delete Image'),
+        content: const Text('Are you sure you want to delete this image?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -553,31 +477,43 @@ class _GalleryScreenState extends State<GalleryScreen>
       setState(() => _isDeleting = true);
 
       try {
-        final List<String> ids = _selectedAssetIds.toList();
+        // Delete using PhotoManager
+        final List<String> ids = [asset.id];
         final result = await PhotoManager.editor.deleteWithIds(ids);
 
-        if (result.isNotEmpty) {
-          // Refresh gallery
-          await _refreshGallery();
+        if (result.contains(asset.id)) {
+          // Rebuild grouped assets after deletion
+          List<AssetEntity> allAssets = _groupedAssets.values
+              .expand((e) => e)
+              .toList();
+          allAssets.remove(asset);
+          _groupAssetsByDate(allAssets);
+
+          setState(() {
+            _selectedImageIndex = null;
+          });
 
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text(
-                  '${result.length} image${result.length > 1 ? 's' : ''} deleted',
-                ),
+                content: const Text('Image deleted successfully'),
                 backgroundColor: AppColors.success,
                 behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
             );
           }
+        } else {
+          throw Exception('Failed to delete');
         }
       } catch (e) {
         print('Error deleting: $e');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Error deleting images: $e'),
+              content: Text('Error deleting image: $e'),
               backgroundColor: AppColors.error,
               behavior: SnackBarBehavior.floating,
             ),
@@ -585,110 +521,658 @@ class _GalleryScreenState extends State<GalleryScreen>
         }
       } finally {
         if (mounted) {
-          setState(() {
-            _isDeleting = false;
-            _selectedAssetIds.clear();
-            _isSelectionMode = false;
-          });
+          setState(() => _isDeleting = false);
         }
       }
     }
   }
 
-  // Share selected images
-  Future<void> _shareSelectedImages() async {
-    if (_selectedAssetIds.isEmpty) return;
-
-    setState(() => _isDeleting = true); // Reuse for loading indicator
-
+  // Fixed share function with proper error handling
+  Future<void> _shareImage(AssetEntity asset) async {
     try {
-      List<AssetEntity> allAssets = _groupedAssets.values
-          .expand((e) => e)
-          .toList();
+      // Loading indicator
+      if (!mounted) return;
 
-      final selectedAssets = allAssets
-          .where((asset) => _selectedAssetIds.contains(asset.id))
-          .toList();
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(
+          child: CircularProgressIndicator(color: AppColors.primaryBlue),
+        ),
+      );
 
-      List<XFile> xFiles = [];
+      File? imageFile = await asset.originFile;
+      imageFile ??= await asset.file;
 
-      for (var asset in selectedAssets) {
-        File? imageFile = await asset.originFile;
-        imageFile ??= await asset.file;
+      if (imageFile == null) {
+        throw Exception("Image file not accessible");
+      }
 
-        if (imageFile != null) {
-          // Create temp files for sharing
-          final cacheDir = await getTemporaryDirectory();
-          final timestamp = DateTime.now().millisecondsSinceEpoch;
-          final sharePath = '${cacheDir.path}/share_$timestamp.jpg';
+      // Create safe cache copy
+      final cacheDir = await getTemporaryDirectory();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final sharePath = '${cacheDir.path}/share_$timestamp.jpg';
 
-          final bytes = await imageFile.readAsBytes();
-          final shareFile = File(sharePath);
-          await shareFile.writeAsBytes(bytes);
+      // Read bytes and write to temp file
+      final bytes = await imageFile.readAsBytes();
+      final shareFile = File(sharePath);
+      await shareFile.writeAsBytes(bytes);
 
-          xFiles.add(
-            XFile(
-              shareFile.path,
-              mimeType: 'image/jpeg',
-              name: 'image_$timestamp.jpg',
-            ),
-          );
+      // Close loader
+      if (mounted) Navigator.pop(context);
+
+      // Share using XFile
+      final xFile = XFile(
+        shareFile.path,
+        mimeType: 'image/jpeg',
+        name: 'image_$timestamp.jpg',
+      );
+
+      await Share.shareXFiles(
+        [xFile],
+        text: "Check out my photo!",
+        sharePositionOrigin: Rect.fromLTWH(0, 0, 100, 100),
+      );
+
+      // Clean up temp file after sharing (with delay)
+      Future.delayed(const Duration(seconds: 5), () {
+        if (shareFile.existsSync()) {
+          shareFile.deleteSync();
         }
-      }
-
-      if (xFiles.isNotEmpty) {
-        await Share.shareXFiles(
-          xFiles,
-          text: "Check out my photos!",
-          sharePositionOrigin: Rect.fromLTWH(0, 0, 100, 100),
-        );
-
-        // Clean up temp files after sharing
-        Future.delayed(const Duration(seconds: 5), () {
-          for (var file in xFiles) {
-            File(file.path).deleteSync();
-          }
-        });
-      }
-
-      // Exit selection mode after sharing
-      setState(() {
-        _selectedAssetIds.clear();
-        _isSelectionMode = false;
       });
     } catch (e) {
       print("Share error: $e");
       if (mounted) {
+        // Close loader if it's still showing
+        try {
+          Navigator.pop(context);
+        } catch (_) {}
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("Could not share images: ${e.toString()}"),
+            content: Text("Could not share image: ${e.toString()}"),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _saveToGallery(AssetEntity asset) async {
+    try {
+      final file = await asset.file;
+      if (file != null) {
+        // For iOS, we can just save the file
+        if (Platform.isIOS) {
+          await GallerySaver.saveImage(
+            file.path,
+            albumName: 'SVS-Watermark-Camera',
+          );
+        } else {
+          // For Android, use PhotoManager
+          await PhotoManager.editor.saveImage(
+            file.readAsBytesSync(),
+            filename: path.basename(file.path),
+            title: path.basename(file.path),
+          );
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Image saved to gallery'),
+              backgroundColor: AppColors.success,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('Error saving: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error saving: $e'),
             backgroundColor: AppColors.error,
             behavior: SnackBarBehavior.floating,
           ),
         );
       }
-    } finally {
-      if (mounted) setState(() => _isDeleting = false);
     }
   }
 
-  // Clear selection
-  void _clearSelection() {
-    setState(() {
-      _selectedAssetIds.clear();
-      _isSelectionMode = false;
-    });
-  }
+  // Updated image preview with swipe down to close and better zoom
+  void _showImagePreview(AssetEntity asset, int globalIndex) {
+    // Pre-load adjacent images for smoother swiping
+    _preloadAdjacentImages(globalIndex);
 
-  // Select all images
-  void _selectAll() {
+    // Get all assets flattened
     List<AssetEntity> allAssets = _groupedAssets.values
         .expand((e) => e)
         .toList();
 
-    setState(() {
-      _selectedAssetIds = allAssets.map((e) => e.id).toSet();
+    // Create a PageController for the PageView
+    PageController pageController = PageController(initialPage: globalIndex);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      enableDrag: true, // Enable drag to close
+      isDismissible: true, // Make dismissible
+      useSafeArea: true,
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height,
+      ),
+      builder: (context) => WillPopScope(
+        onWillPop: () async => true,
+        child: DraggableScrollableSheet(
+          initialChildSize: 1.0,
+          minChildSize: 0.95, // Allow slight drag before closing
+          maxChildSize: 1.0,
+          expand: false,
+          builder: (context, scrollController) {
+            return Container(
+              color: Colors.transparent,
+              child: Stack(
+                children: [
+                  // PageView for swipeable images with zoom capability
+                  PageView.builder(
+                    controller: pageController,
+                    itemCount: allAssets.length,
+                    onPageChanged: (index) {
+                      setState(() {
+                        _selectedImageIndex = index;
+                      });
+                      _preloadAdjacentImages(index);
+                    },
+                    itemBuilder: (context, index) {
+                      final currentAsset = allAssets[index];
+                      return FutureBuilder<File?>(
+                        future: currentAsset.file,
+                        builder: (context, snapshot) {
+                          final file = snapshot.data;
+
+                          if (snapshot.connectionState !=
+                                  ConnectionState.done ||
+                              file == null) {
+                            return _buildLoadingPlaceholder();
+                          }
+
+                          return _buildZoomableImage(
+                            file,
+                            currentAsset,
+                            index,
+                            allAssets.length,
+                          );
+                        },
+                      );
+                    },
+                  ),
+
+                  // Top gradient bar (semi-transparent) - draggable area for swipe down
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: GestureDetector(
+                      onVerticalDragEnd: (details) {
+                        if (details.primaryVelocity! > 500) {
+                          Navigator.pop(context);
+                        }
+                      },
+                      child: Container(
+                        height: 100,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.black.withAlpha(179),
+                              Colors.transparent,
+                            ],
+                          ),
+                        ),
+                        child: SafeArea(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                // Empty space for balance (no close button)
+                                const SizedBox(width: 40),
+
+                                // Date and time badge
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withAlpha(153),
+                                    borderRadius: BorderRadius.circular(30),
+                                    border: Border.all(
+                                      color: Colors.white.withAlpha(51),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.calendar_today,
+                                        color: AppColors.primaryBlue,
+                                        size: 14,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        _formatDateDetailed(
+                                          asset.createDateTime,
+                                        ),
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+
+                                // Counter badge
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primaryBlue,
+                                    borderRadius: BorderRadius.circular(30),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: AppColors.primaryBlue.withAlpha(
+                                          102,
+                                        ),
+                                        blurRadius: 10,
+                                        spreadRadius: 2,
+                                      ),
+                                    ],
+                                  ),
+                                  child: Text(
+                                    '${globalIndex + 1}/${allAssets.length}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Bottom gradient bar (semi-transparent)
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: Container(
+                      height: 140,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [
+                            Colors.black.withAlpha(179),
+                            Colors.transparent,
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Bottom action buttons
+                  Positioned(
+                    bottom: MediaQuery.of(context).padding.bottom + 20,
+                    left: 0,
+                    right: 0,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 30),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          _buildActionButton(
+                            icon: Icons.share,
+                            label: 'Share',
+                            color: Colors.white,
+                            backgroundColor: Colors.white.withAlpha(51),
+                            onTap: () {
+                              Navigator.pop(context);
+                              _shareImage(
+                                allAssets[pageController.page?.round() ??
+                                    globalIndex],
+                              );
+                            },
+                          ),
+
+                          _buildActionButton(
+                            icon: Icons.download,
+                            label: 'Save',
+                            color: Colors.white,
+                            backgroundColor: AppColors.primaryBlue,
+                            onTap: () {
+                              Navigator.pop(context);
+                              _saveToGallery(
+                                allAssets[pageController.page?.round() ??
+                                    globalIndex],
+                              );
+                            },
+                            hasGlow: true,
+                          ),
+
+                          _buildActionButton(
+                            icon: Icons.delete_outline,
+                            label: 'Delete',
+                            color: Colors.white,
+                            backgroundColor: Colors.red.withAlpha(179),
+                            onTap: () {
+                              Navigator.pop(context);
+                              _deleteImage(
+                                allAssets[pageController.page?.round() ??
+                                    globalIndex],
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Swipe down indicator (small handle)
+                  Positioned(
+                    top: MediaQuery.of(context).padding.top + 8,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: GestureDetector(
+                        onTap: () => Navigator.pop(context),
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withAlpha(153),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    ).then((_) {
+      // Reset selected index when closing
+      setState(() {
+        // Keep selection but maybe clear highlight
+      });
     });
+  }
+
+  // New zoomable image widget
+  Widget _buildZoomableImage(
+    File file,
+    AssetEntity asset,
+    int index,
+    int totalCount,
+  ) {
+    return Container(
+      color: Colors.transparent,
+      child: Stack(
+        children: [
+          // Zoomable image
+          Center(
+            child: InteractiveViewer(
+              minScale: 0.5,
+              maxScale: 4.0,
+              panEnabled: true,
+              scaleEnabled: true,
+              boundaryMargin: const EdgeInsets.all(20),
+              clipBehavior: Clip.none,
+              child: Hero(
+                tag: 'image_${asset.id}',
+                child: Image.file(
+                  file,
+                  fit: BoxFit.contain,
+                  errorBuilder: (context, error, stackTrace) {
+                    return _buildErrorPlaceholder();
+                  },
+                ),
+              ),
+            ),
+          ),
+
+          // Image info overlay at bottom (semi-transparent)
+          Positioned(
+            bottom: 30,
+            left: 20,
+            right: 20,
+            child: AnimatedOpacity(
+              opacity: 1.0,
+              duration: const Duration(milliseconds: 300),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.black.withAlpha(102),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: Colors.white.withAlpha(51),
+                    width: 1,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    // Image metadata
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.photo_camera,
+                                size: 14,
+                                color: AppColors.primaryBlue,
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'Image ${index + 1} of $totalCount',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (asset.title != null) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              asset.title!,
+                              style: TextStyle(
+                                color: Colors.white.withAlpha(179),
+                                fontSize: 12,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+
+                    // Image size indicator
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withAlpha(26),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: FutureBuilder<File?>(
+                        future: asset.file,
+                        builder: (context, snapshot) {
+                          final size = snapshot.data?.lengthSync();
+                          return Text(
+                            _formatFileSize(size ?? 0),
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 10,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required Color backgroundColor,
+    required VoidCallback onTap,
+    bool hasGlow = false,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(color: Colors.white.withAlpha(51), width: 1),
+          boxShadow: hasGlow
+              ? [
+                  BoxShadow(
+                    color: AppColors.primaryBlue.withAlpha(102),
+                    blurRadius: 15,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 18),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingPlaceholder() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              color: Colors.white.withAlpha(26),
+              shape: BoxShape.circle,
+            ),
+            child: const Center(
+              child: CircularProgressIndicator(
+                color: AppColors.primaryBlue,
+                strokeWidth: 2,
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Loading image...',
+            style: TextStyle(color: Colors.white.withAlpha(179), fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorPlaceholder() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: Colors.red.withAlpha(26),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.broken_image, size: 40, color: Colors.red),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Failed to load image',
+            style: TextStyle(color: Colors.white.withAlpha(179), fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatFileSize(int bytes) {
+    if (bytes <= 0) return '0 B';
+    const suffixes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    int i = (log(bytes) / log(1024)).floor();
+    double size = bytes / pow(1024, i);
+    return '${size.toStringAsFixed(1)} ${suffixes[i]}';
+  }
+
+  void _preloadAdjacentImages(int currentIndex) {
+    List<AssetEntity> allAssets = _groupedAssets.values
+        .expand((e) => e)
+        .toList();
+
+    // Preload next and previous images for smoother swiping
+    if (currentIndex > 0) {
+      allAssets[currentIndex - 1].file;
+    }
+    if (currentIndex < allAssets.length - 1) {
+      allAssets[currentIndex + 1].file;
+    }
   }
 
   void _showPermissionDialog() {
@@ -732,12 +1216,8 @@ class _GalleryScreenState extends State<GalleryScreen>
     }
   }
 
-  String _formatFileSize(int bytes) {
-    if (bytes <= 0) return '0 B';
-    const suffixes = ['B', 'KB', 'MB', 'GB'];
-    int i = (log(bytes) / log(1024)).floor();
-    double size = bytes / pow(1024, i);
-    return '${size.toStringAsFixed(1)} ${suffixes[i]}';
+  String _formatDateDetailed(DateTime date) {
+    return '${date.day}/${date.month}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
   }
 
   Widget _buildPermissionDenied() {
@@ -827,188 +1307,69 @@ class _GalleryScreenState extends State<GalleryScreen>
         child: SafeArea(
           child: Column(
             children: [
-              // Header - changes based on selection mode
+              // Header
               Padding(
                 padding: const EdgeInsets.all(20),
                 child: Row(
                   children: [
-                    // Back button or cancel selection
-                    if (_isSelectionMode)
-                      IconButton(
-                        onPressed: _clearSelection,
-                        icon: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppColors.primaryBlue.withAlpha(51),
-                                blurRadius: 10,
-                                offset: const Offset(0, 5),
-                              ),
-                            ],
-                          ),
-                          child: const Icon(
-                            Icons.close,
-                            color: AppColors.primaryBlue,
-                          ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.primaryBlue.withAlpha(51),
+                              blurRadius: 10,
+                              offset: const Offset(0, 5),
+                            ),
+                          ],
                         ),
-                      )
-                    else
-                      IconButton(
-                        onPressed: () => Navigator.pop(context),
-                        icon: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppColors.primaryBlue.withAlpha(51),
-                                blurRadius: 10,
-                                offset: const Offset(0, 5),
-                              ),
-                            ],
-                          ),
-                          child: const Icon(
-                            Icons.arrow_back,
-                            color: AppColors.primaryBlue,
-                          ),
+                        child: const Icon(
+                          Icons.arrow_back,
+                          color: AppColors.primaryBlue,
                         ),
                       ),
-
+                    ),
                     const SizedBox(width: 16),
-
-                    // Title
-                    if (_isSelectionMode)
-                      Text(
-                        '${_selectedAssetIds.length} selected',
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.darkBlue,
-                        ),
-                      )
-                    else
-                      const Text(
-                        'Gallery',
-                        style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.darkBlue,
-                        ),
+                    const Text(
+                      'Gallery',
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.darkBlue,
                       ),
-
+                    ),
                     const Spacer(),
-
-                    // Selection mode actions
-                    if (_isSelectionMode) ...[
-                      // Select all button
-                      if (_selectedAssetIds.length < totalAssets)
-                        IconButton(
-                          onPressed: _selectAll,
-                          icon: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: AppColors.primaryBlue.withAlpha(51),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 5),
-                                ),
-                              ],
+                    IconButton(
+                      onPressed: _refreshGallery,
+                      icon: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.primaryBlue.withAlpha(51),
+                              blurRadius: 10,
+                              offset: const Offset(0, 5),
                             ),
-                            child: const Icon(
-                              Icons.select_all,
-                              color: AppColors.primaryBlue,
-                              size: 20,
-                            ),
-                          ),
+                          ],
                         ),
-
-                      // Share selected
-                      if (_selectedAssetIds.isNotEmpty)
-                        IconButton(
-                          onPressed: _shareSelectedImages,
-                          icon: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: AppColors.primaryBlue.withAlpha(51),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 5),
-                                ),
-                              ],
-                            ),
-                            child: const Icon(
-                              Icons.share,
-                              color: AppColors.primaryBlue,
-                              size: 20,
-                            ),
-                          ),
-                        ),
-
-                      // Delete selected
-                      if (_selectedAssetIds.isNotEmpty)
-                        IconButton(
-                          onPressed: _deleteSelectedImages,
-                          icon: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: AppColors.error.withAlpha(51),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 5),
-                                ),
-                              ],
-                            ),
-                            child: Icon(
-                              Icons.delete_outline,
-                              color: _isDeleting
-                                  ? AppColors.grey
-                                  : AppColors.error,
-                              size: 20,
-                            ),
-                          ),
-                        ),
-                    ] else
-                      // Normal mode actions
-                      IconButton(
-                        onPressed: _refreshGallery,
-                        icon: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppColors.primaryBlue.withAlpha(51),
-                                blurRadius: 10,
-                                offset: const Offset(0, 5),
-                              ),
-                            ],
-                          ),
-                          child: const Icon(
-                            Icons.refresh,
-                            color: AppColors.primaryBlue,
-                          ),
+                        child: const Icon(
+                          Icons.refresh,
+                          color: AppColors.primaryBlue,
                         ),
                       ),
+                    ),
                   ],
                 ),
               ),
 
               // Stats
-              if (!_isLoading && totalAssets > 0 && !_isSelectionMode)
+              if (!_isLoading && totalAssets > 0)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: Row(
@@ -1163,15 +1524,11 @@ class _GalleryScreenState extends State<GalleryScreen>
                                       dateKey,
                                       localIndex,
                                     );
-                                    final isSelected = _selectedAssetIds
-                                        .contains(asset.id);
-
                                     return _buildImageTile(
                                       asset,
                                       globalIndex,
                                       dateKey,
                                       localIndex,
-                                      isSelected,
                                     );
                                   },
                                 ),
@@ -1199,53 +1556,6 @@ class _GalleryScreenState extends State<GalleryScreen>
             ],
           ),
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _openCamera,
-        backgroundColor: AppColors.primaryBlue,
-        elevation: 6,
-        child: const Icon(Icons.camera_alt, color: Colors.white, size: 28),
-      ),
-
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-    );
-  }
-
-  Future<void> _openCamera() async {
-    final status = await Permission.camera.request();
-
-    if (status.isGranted) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (context) => const CameraPage()),
-      ).then((_) {
-        // Refresh gallery when returning
-        _refreshGallery();
-      });
-    } else {
-      _showCameraPermissionDialog();
-    }
-  }
-
-  void _showCameraPermissionDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Camera Permission Required'),
-        content: const Text('Please grant camera permission to take photos.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              openAppSettings();
-            },
-            child: const Text('Settings'),
-          ),
-        ],
       ),
     );
   }
@@ -1312,11 +1622,16 @@ class _GalleryScreenState extends State<GalleryScreen>
     int globalIndex,
     String dateKey,
     int localIndex,
-    bool isSelected,
   ) {
+    final bool isSelected = _selectedImageIndex == globalIndex;
+
     return GestureDetector(
-      onTap: () => _handleImageTap(asset, globalIndex),
-      onLongPress: () => _handleImageLongPress(asset.id),
+      onTap: () {
+        setState(() {
+          _selectedImageIndex = globalIndex;
+        });
+        _showImagePreview(asset, globalIndex);
+      },
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
@@ -1358,66 +1673,54 @@ class _GalleryScreenState extends State<GalleryScreen>
                 },
               ),
 
-              // Selection overlay
-              if (_isSelectionMode)
-                Positioned.fill(
-                  child: Container(
-                    color: isSelected
-                        ? AppColors.primaryBlue.withAlpha(77)
-                        : Colors.black.withAlpha(102),
-                  ),
-                ),
-
-              // Selection checkbox
-              if (_isSelectionMode)
+              // Selection indicator
+              if (isSelected)
                 Positioned(
                   top: 4,
                   right: 4,
                   child: Container(
-                    width: 24,
-                    height: 24,
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? AppColors.primaryBlue
-                          : Colors.white.withAlpha(179),
+                    padding: const EdgeInsets.all(2),
+                    decoration: const BoxDecoration(
+                      color: AppColors.primaryBlue,
                       shape: BoxShape.circle,
-                      border: Border.all(
-                        color: isSelected
-                            ? Colors.white
-                            : AppColors.primaryBlue,
-                        width: 2,
-                      ),
                     ),
-                    child: isSelected
-                        ? const Icon(Icons.check, color: Colors.white, size: 16)
-                        : null,
+                    child: const Icon(
+                      Icons.check,
+                      color: Colors.white,
+                      size: 12,
+                    ),
                   ),
                 ),
 
-              // Position indicator (local index in group) - only in normal mode
-              if (!_isSelectionMode)
-                Positioned(
-                  bottom: 4,
-                  left: 4,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withAlpha(102),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      '${localIndex + 1}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 8,
-                        fontWeight: FontWeight.bold,
-                      ),
+              // Index overlay (for debugging/selection)
+              if (isSelected)
+                Positioned.fill(
+                  child: Container(color: AppColors.primaryBlue.withAlpha(26)),
+                ),
+
+              // Position indicator (local index in group)
+              Positioned(
+                bottom: 4,
+                left: 4,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withAlpha(102),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    '${localIndex + 1}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
+              ),
             ],
           ),
         ),
@@ -1441,3 +1744,7 @@ class _GalleryScreenState extends State<GalleryScreen>
     super.dispose();
   }
 }
+
+// Add warning color to AppColors
+// In your AppColors class, add:
+// static const Color warning = Color(0xFFFFA000);

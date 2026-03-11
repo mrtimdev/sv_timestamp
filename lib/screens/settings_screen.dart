@@ -27,7 +27,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _dateFormat = 'DD/MM/YYYY';
   String _timeFormat = '24-hour';
   double _watermarkOpacity = 0.8;
-  double _watermarkSize = 25.0;
+  double _watermarkSize = 35.0;
   String _appTitle = 'SV';
   String? _customLogoPath;
 
@@ -69,7 +69,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _dateFormat = _prefs.getString('date_format') ?? 'DD/MM/YYYY';
       _timeFormat = _prefs.getString('time_format') ?? '24-hour';
       _watermarkOpacity = _prefs.getDouble('watermark_opacity') ?? 0.8;
-      _watermarkSize = _prefs.getDouble('watermark_size') ?? 25.0;
+      _watermarkSize = _prefs.getDouble('watermark_size') ?? 35.0;
       _appTitle = _prefs.getString('app_title') ?? 'SV';
       _customLogoPath = _prefs.getString('custom_logo_path');
     });
@@ -85,6 +85,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } else if (value is int) {
       await _prefs.setInt(key, value);
     }
+  }
+
+  Future<void> _updateAppTitle(String title) async {
+    await _saveSetting('app_title', title);
+    MetadataService.setAppTitle(title);
+    setState(() {
+      _appTitle = title;
+    });
   }
 
   Future<void> _updateCustomLogo(String? path) async {
@@ -111,57 +119,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       if (image != null) {
         await _updateCustomLogo(image.path);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(AppLocalizations.of(context)!.logoUpdated),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content:
-                Text('${AppLocalizations.of(context)!.logoUpdateError}: $e'),
-            backgroundColor: Colors.red,
+          const SnackBar(
+            content: Text('Logo updated successfully'),
+            backgroundColor: Colors.green,
           ),
         );
       }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error selecting logo: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
   void _removeCustomLogo() {
-    final loc = AppLocalizations.of(context);
-    if (loc == null) return;
-
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(loc.removeLogoTitle),
-        content: Text(loc.removeLogoContent),
+        title: const Text('Remove Custom Logo'),
+        content: const Text('Are you sure you want to remove the custom logo?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text(loc.cancel),
+            child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () {
               _updateCustomLogo(null);
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(loc.logoRemoved),
+                const SnackBar(
+                  content: Text('Logo removed successfully'),
                   backgroundColor: Colors.green,
                 ),
               );
             },
-            child: Text(
-              loc.remove,
-              style: const TextStyle(color: Colors.red),
-            ),
+            child: const Text('Remove', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -170,35 +167,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final loc = AppLocalizations.of(context);
-    if (loc == null) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
     return Scaffold(
       appBar: AppBar(
-        title: Text(loc.settings),
+        title: const Text('Settings'),
         centerTitle: true,
         elevation: 0,
         actions: [
           IconButton(
             icon: const Icon(Icons.restore),
             onPressed: _resetToDefaults,
-            tooltip: loc.resetDefaults,
+            tooltip: 'Reset to defaults',
           ),
         ],
       ),
       body: ListView(
         children: [
           // App Customization
+          // _buildSectionHeader('App Customization'),
+          // SettingItem(
+          //   icon: Icons.title,
+          //   title: 'App Title',
+          //   subtitle: _appTitle,
+          //   trailing: IconButton(
+          //     icon: const Icon(Icons.edit),
+          //     onPressed: () => _showAppTitleDialog(context),
+          //   ),
+          // ),
           SettingItem(
             icon: Icons.image,
-            title: loc.customLogo,
+            title: 'Custom Logo',
             subtitle: _customLogoPath != null
-                ? loc.customLogoSet
-                : loc.useDefaultLogo,
+                ? 'Custom logo set'
+                : 'Use default logo',
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -206,35 +206,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   IconButton(
                     icon: const Icon(Icons.delete, color: Colors.red),
                     onPressed: _removeCustomLogo,
-                    tooltip: loc.removeLogo,
+                    tooltip: 'Remove logo',
                   ),
                 IconButton(
                   icon: const Icon(Icons.upload),
                   onPressed: _pickCustomLogo,
-                  tooltip: loc.uploadLogo,
+                  tooltip: 'Upload logo',
                 ),
               ],
             ),
           ),
 
-          _buildSectionHeader(loc.language),
+          _buildSectionHeader(AppLocalizations.of(context)!.language),
           SettingItem(
             icon: Icons.language,
-            title: loc.language,
+            title: AppLocalizations.of(context)!.language,
             subtitle:
                 context.watch<SettingsProvider>().currentLocale.languageCode ==
-                        'en'
-                    ? 'English'
-                    : 'ខ្មែរ',
+                    'en'
+                ? 'English'
+                : 'ខ្មែរ',
             onTap: () => _showLanguageSheet(context),
           ),
 
           // Camera Settings
-          _buildSectionHeader(loc.cameraSettings),
+          _buildSectionHeader('Camera Settings'),
           SettingItem(
             icon: Icons.volume_up,
-            title: loc.captureSound,
-            subtitle: loc.captureSoundSubtitle,
+            title: 'Capture Sound',
+            subtitle: 'Play sound when taking photo',
             trailing: Switch(
               value: _soundOnCapture,
               onChanged: (value) {
@@ -245,8 +245,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           SettingItem(
             icon: Icons.vibration,
-            title: loc.vibrationFeedback,
-            subtitle: loc.vibrationFeedbackSubtitle,
+            title: 'Vibration Feedback',
+            subtitle: 'Vibrate on capture',
             trailing: Switch(
               value: _vibrationOnCapture,
               onChanged: (value) {
@@ -255,17 +255,90 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
           ),
+          // SettingItem(
+          //   icon: Icons.photo_filter,
+          //   title: 'Image Quality',
+          //   subtitle: 'Higher quality uses more storage',
+          //   trailing: DropdownButton<String>(
+          //     value: _imageQuality,
+          //     onChanged: (value) {
+          //       if (value != null) {
+          //         setState(() => _imageQuality = value);
+          //         _saveSetting('image_quality', value);
+          //       }
+          //     },
+          //     items: _qualityOptions
+          //         .map((q) => DropdownMenuItem(value: q, child: Text(q)))
+          //         .toList(),
+          //   ),
+          // ),
+
+          // // Location Settings
+          // _buildSectionHeader('Location Settings'),
+          // SettingItem(
+          //   icon: Icons.location_on,
+          //   title: 'Auto Location',
+          //   subtitle: 'Automatically add location to photos',
+          //   trailing: Switch(
+          //     value: _autoLocation,
+          //     onChanged: (value) {
+          //       setState(() => _autoLocation = value);
+          //       _saveSetting('auto_location', value);
+          //     },
+          //   ),
+          // ),
+
+          // Watermark Settings
+          // _buildSectionHeader('Watermark Settings'),
+          // SettingItem(
+          //   icon: Icons.water_damage,
+          //   title: 'Watermark Position',
+          //   subtitle: 'Position of timestamp watermark',
+          //   trailing: DropdownButton<String>(
+          //     value: _watermarkPosition,
+          //     onChanged: (value) {
+          //       if (value != null) {
+          //         setState(() => _watermarkPosition = value);
+          //         _saveSetting('watermark_position', value);
+          //       }
+          //     },
+          //     items: _positionOptions
+          //         .map((p) => DropdownMenuItem(value: p, child: Text(p)))
+          //         .toList(),
+          //   ),
+          // ),
+          // SettingItem(
+          //   icon: Icons.opacity,
+          //   title: 'Watermark Opacity',
+          //   subtitle: 'Adjust watermark transparency',
+          //   trailing: SizedBox(
+          //     width: 150,
+          //     child: Slider(
+          //       value: _watermarkOpacity,
+          //       min: 0.1,
+          //       max: 1.0,
+          //       divisions: 9,
+          //       label: '${(_watermarkOpacity * 100).toInt()}%',
+          //       onChanged: (value) {
+          //         setState(() => _watermarkOpacity = value);
+          //       },
+          //       onChangeEnd: (value) {
+          //         _saveSetting('watermark_opacity', value);
+          //       },
+          //     ),
+          //   ),
+          // ),
           SettingItem(
             icon: Icons.text_fields,
-            title: loc.watermarkSize,
-            subtitle: loc.watermarkSizeSubtitle,
+            title: 'Watermark Text Size',
+            subtitle: 'Size of watermark text',
             trailing: SizedBox(
               width: 150,
               child: Slider(
                 value: _watermarkSize,
                 min: 20.0,
                 max: 100.0,
-                divisions: 16,
+                // divisions: 6,
                 label: '${_watermarkSize.toInt()}px',
                 onChanged: (value) {
                   setState(() => _watermarkSize = value);
@@ -276,24 +349,78 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ),
+          // SettingItem(
+          //   icon: Icons.date_range,
+          //   title: 'Date Format',
+          //   subtitle: 'How dates are displayed',
+          //   trailing: DropdownButton<String>(
+          //     value: _dateFormat,
+          //     onChanged: (value) {
+          //       if (value != null) {
+          //         setState(() => _dateFormat = value);
+          //         _saveSetting('date_format', value);
+          //       }
+          //     },
+          //     items: _dateFormats
+          //         .map((f) => DropdownMenuItem(value: f, child: Text(f)))
+          //         .toList(),
+          //   ),
+          // ),
+          // SettingItem(
+          //   icon: Icons.access_time,
+          //   title: 'Time Format',
+          //   subtitle: '12-hour or 24-hour format',
+          //   trailing: DropdownButton<String>(
+          //     value: _timeFormat,
+          //     onChanged: (value) {
+          //       if (value != null) {
+          //         setState(() => _timeFormat = value);
+          //         _saveSetting('time_format', value);
+          //       }
+          //     },
+          //     items: _timeFormats
+          //         .map((f) => DropdownMenuItem(value: f, child: Text(f)))
+          //         .toList(),
+          //   ),
+          // ),
 
           // Storage Settings
-          _buildSectionHeader(loc.storageSettings),
+          // _buildSectionHeader('Storage Settings'),
+          // SettingItem(
+          //   icon: Icons.save,
+          //   title: 'Save Original',
+          //   subtitle: 'Keep original unmarked image',
+          //   trailing: Switch(
+          //     value: _saveOriginal,
+          //     onChanged: (value) {
+          //       setState(() => _saveOriginal = value);
+          //       _saveSetting('save_original', value);
+          //     },
+          //   ),
+          // ),
           SettingItem(
             icon: Icons.storage,
-            title: loc.storageUsage,
-            subtitle: loc.storageUsageSubtitle,
+            title: 'Storage Usage',
+            subtitle: 'View and manage storage',
             onTap: () => _showStorageInfo(context),
           ),
 
           // Actions
-          _buildSectionHeader(loc.actions),
+          _buildSectionHeader('Actions'),
           SettingItem(
             icon: Icons.delete,
-            title: loc.clearAllPhotos,
-            subtitle: loc.clearAllPhotosSubtitle,
+            title: 'Clear All Photos',
+            subtitle: 'Permanently delete all captured images',
             onTap: () => _confirmDeleteAll(context),
           ),
+          // SettingItem(
+          //   icon: Icons.info,
+          //   title: 'About App',
+          //   subtitle: 'Version 1.0.0 • About developer',
+          //   onTap: () => _showAboutDialog(context),
+          // ),
+
+          // const SizedBox(height: 40),
         ],
       ),
     );
@@ -314,19 +441,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _resetToDefaults() {
-    final loc = AppLocalizations.of(context);
-    if (loc == null) return;
+  void _showAppTitleDialog(BuildContext context) {
+    final TextEditingController controller = TextEditingController(
+      text: _appTitle,
+    );
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(loc.resetSettingsTitle),
-        content: Text(loc.resetSettingsContent),
+        title: const Text('Change App Title'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            hintText: 'Enter app title',
+            border: OutlineInputBorder(),
+          ),
+          maxLength: 30,
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text(loc.cancel),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              final newTitle = controller.text.trim();
+              if (newTitle.isNotEmpty) {
+                _updateAppTitle(newTitle);
+                Navigator.pop(context);
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _resetToDefaults() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reset Settings?'),
+        content: const Text('All settings will be reset to default values.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () async {
@@ -337,17 +498,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               MetadataService.setAppTitle('SV');
               MetadataService.setCustomLogoPath(null);
 
-              if (mounted) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(loc.settingsReset),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-              }
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Settings reset to defaults'),
+                  backgroundColor: Colors.green,
+                ),
+              );
             },
-            child: Text(loc.reset),
+            child: const Text('Reset'),
           ),
         ],
       ),
@@ -355,34 +514,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _showStorageInfo(BuildContext context) async {
-    final loc = AppLocalizations.of(context);
-    if (loc == null) return;
-
     final storageService = Provider.of<StorageService>(context, listen: false);
     final size = await storageService.getTotalStorageSize();
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(loc.storageInfo),
+        title: const Text('Storage Information'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('${loc.totalImages}: ${storageService.capturedImages.length}'),
+            Text('Total Images: ${storageService.capturedImages.length}'),
             const SizedBox(height: 8),
-            Text('${loc.storageUsed}: ${_formatBytes(size)}'),
+            Text('Storage Used: ${_formatBytes(size)}'),
             const SizedBox(height: 16),
-            Text(
-              loc.storageNote,
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            const Text(
+              'Note: Images are stored locally on your device.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text(loc.ok),
+            child: const Text('OK'),
           ),
         ],
       ),
@@ -390,18 +546,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _confirmDeleteAll(BuildContext context) {
-    final loc = AppLocalizations.of(context);
-    if (loc == null) return;
-
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(loc.deleteAllPhotosTitle),
-        content: Text(loc.deleteAllPhotosContent),
+        title: const Text('Delete All Photos?'),
+        content: const Text(
+          'This will permanently delete all captured images. '
+          'This action cannot be undone.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text(loc.cancel),
+            child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () async {
@@ -411,22 +567,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 listen: false,
               );
               await storageService.deleteAllImages();
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(loc.allImagesDeleted),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-              }
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('All images deleted'),
+                  backgroundColor: Colors.green,
+                ),
+              );
             },
-            child: Text(
-              loc.deleteAll,
-              style: const TextStyle(color: Colors.red),
+            child: const Text(
+              'Delete All',
+              style: TextStyle(color: Colors.red),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  void _showAboutDialog(BuildContext context) {
+    showAboutDialog(
+      context: context,
+      applicationName: _appTitle,
+      applicationVersion: '1.0.0',
+      applicationLegalese: '© 2026 SV TimeStamp. All rights reserved.',
+      children: [
+        const SizedBox(height: 16),
+        const Text(
+          'A powerful camera app that automatically adds timestamp and location '
+          'to your photos. Perfect for documentation, evidence, and memories.',
+        ),
+        const SizedBox(height: 12),
+        const Text('Features:', style: TextStyle(fontWeight: FontWeight.bold)),
+        const Text('• Real-time timestamp overlay'),
+        const Text('• GPS location embedding'),
+        const Text('• Customizable watermark'),
+        const Text('• Offline functionality'),
+        const SizedBox(height: 12),
+        const Text('Developed with ❤️ using Flutter'),
+      ],
     );
   }
 
@@ -440,8 +618,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _showLanguageSheet(BuildContext context) {
     final settingsProvider = context.read<SettingsProvider>();
     final currentLocale = settingsProvider.currentLocale;
-    final loc = AppLocalizations.of(context);
-    if (loc == null) return;
 
     showModalBottomSheet(
       context: context,
@@ -456,7 +632,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                loc.language,
+                AppLocalizations.of(context)!.language,
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 18,
