@@ -6,10 +6,10 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:camera/camera.dart';
-import 'package:svs_timestamp/screens/new_custom_camera.dart';
-import 'package:svs_timestamp/screens/gallery_screen.dart';
-import 'package:svs_timestamp/screens/full_screen.dart'; // Import full screen
-import 'package:svs_timestamp/screens/settings_screen.dart';
+import 'package:sv_timestamp/screens/new_custom_camera.dart';
+import 'package:sv_timestamp/screens/gallery_screen.dart';
+import 'package:sv_timestamp/screens/full_screen.dart'; // Import full screen
+import 'package:sv_timestamp/screens/settings_screen.dart';
 
 import '../constants/app_colors.dart';
 
@@ -166,7 +166,7 @@ class _HomeScreenState extends State<HomeScreen>
         // Try to find our app's album first
         AssetPathEntity? targetAlbum;
         for (var album in albums) {
-          if (album.name == 'SVS-Watermark-Camera') {
+          if (album.name == 'SV-Watermark-Camera') {
             targetAlbum = album;
             break;
           }
@@ -624,7 +624,7 @@ class _HomeScreenState extends State<HomeScreen>
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'SVS Timestamp',
+                                'SV TimeStamp',
                                 style: TextStyle(
                                   fontSize: 42,
                                   fontWeight: FontWeight.bold,

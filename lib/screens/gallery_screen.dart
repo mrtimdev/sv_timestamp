@@ -11,7 +11,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:svs_timestamp/screens/new_custom_camera.dart';
+import 'package:sv_timestamp/screens/new_custom_camera.dart';
 import '../constants/app_colors.dart';
 import 'full_screen.dart'; // Import the new full screen
 
@@ -164,7 +164,7 @@ class _GalleryScreenState extends State<GalleryScreen>
 
       // Find our app's album
       for (var album in albums) {
-        if (album.name == 'SVS-Watermark-Camera') {
+        if (album.name == 'SV-Watermark-Camera') {
           _targetAlbum = album;
           break;
         }

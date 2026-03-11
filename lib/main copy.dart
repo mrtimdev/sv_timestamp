@@ -2,11 +2,11 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:svs_timestamp/constants/app_colors.dart';
-import 'package:svs_timestamp/screens/home_screen.dart';
-import 'package:svs_timestamp/utils/storage_service.dart';
-import 'package:svs_timestamp/utils/setting_provider.dart';
-import 'package:svs_timestamp/l10n/app_localizations.dart';
+import 'package:sv_timestamp/constants/app_colors.dart';
+import 'package:sv_timestamp/screens/home_screen.dart';
+import 'package:sv_timestamp/utils/storage_service.dart';
+import 'package:sv_timestamp/utils/setting_provider.dart';
+import 'package:sv_timestamp/l10n/app_localizations.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,7 +27,7 @@ class MyApp extends StatelessWidget {
         builder: (context) {
           final settingsProvider = context.watch<SettingsProvider>();
           return MaterialApp(
-            title: 'SVS Timestamp',
+            title: 'SV TimeStamp',
             debugShowCheckedModeBanner: false,
             locale: settingsProvider.currentLocale,
             localizationsDelegates: AppLocalizations.localizationsDelegates,

@@ -14,11 +14,11 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:gallery_saver_plus/gallery_saver.dart';
-import 'package:svs_timestamp/l10n/app_localizations.dart';
-import 'package:svs_timestamp/screens/SettingsScreen.dart';
-import 'package:svs_timestamp/screens/gallery_screen.dart';
+import 'package:sv_timestamp/l10n/app_localizations.dart';
+import 'package:sv_timestamp/screens/SettingsScreen.dart';
+import 'package:sv_timestamp/screens/gallery_screen.dart';
 import 'package:vibration/vibration.dart';
-import 'package:svs_timestamp/models/captured_image.dart';
+import 'package:sv_timestamp/models/captured_image.dart';
 import 'package:photo_manager/photo_manager.dart';
 import '../utils/metadata_service.dart';
 import '../utils/storage_service.dart';
@@ -112,7 +112,7 @@ class _CameraScreenState extends State<CameraScreen>
           filterOption: filterOption,
         );
         for (var a in albums) {
-          if (a.name == 'SVS-Watermark-Camera') {
+          if (a.name == 'SV-Watermark-Camera') {
             final assets = await a.getAssetListPaged(page: 0, size: 1);
             if (assets.isNotEmpty) {
               final file = await assets.first.file;
@@ -129,8 +129,8 @@ class _CameraScreenState extends State<CameraScreen>
       // Fallback
       if (Platform.isAndroid) {
         final dirs = [
-          Directory('/storage/emulated/0/Pictures/SVS-Watermark-Camera'),
-          Directory('/storage/emulated/0/DCIM/SVS-Watermark-Camera'),
+          Directory('/storage/emulated/0/Pictures/SV-Watermark-Camera'),
+          Directory('/storage/emulated/0/DCIM/SV-Watermark-Camera'),
         ];
         List<File> images = [];
         for (var d in dirs) {
@@ -457,7 +457,7 @@ class _CameraScreenState extends State<CameraScreen>
       // Save to device gallery
       final result = await GallerySaver.saveImage(
         image.path,
-        albumName: 'SVS-Watermark-Camera',
+        albumName: 'SV-Watermark-Camera',
       );
 
       if (result == true && mounted) {

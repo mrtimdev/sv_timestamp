@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:svs_timestamp/l10n/app_localizations.dart';
-import 'package:svs_timestamp/utils/setting_provider.dart';
-import 'package:svs_timestamp/utils/storage_service.dart';
-import 'package:svs_timestamp/widgets/setting_item.dart';
-import 'package:svs_timestamp/utils/metadata_service.dart';
+import 'package:sv_timestamp/l10n/app_localizations.dart';
+import 'package:sv_timestamp/utils/setting_provider.dart';
+import 'package:sv_timestamp/utils/storage_service.dart';
+import 'package:sv_timestamp/widgets/setting_item.dart';
+import 'package:sv_timestamp/utils/metadata_service.dart';
 import 'package:image_picker/image_picker.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -124,8 +124,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content:
-                Text('${AppLocalizations.of(context)!.logoUpdateError}: $e'),
+            content: Text(
+              '${AppLocalizations.of(context)!.logoUpdateError}: $e',
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -158,10 +159,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               );
             },
-            child: Text(
-              loc.remove,
-              style: const TextStyle(color: Colors.red),
-            ),
+            child: Text(loc.remove, style: const TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -172,9 +170,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
     if (loc == null) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
@@ -223,9 +219,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: loc.language,
             subtitle:
                 context.watch<SettingsProvider>().currentLocale.languageCode ==
-                        'en'
-                    ? 'English'
-                    : 'ខ្មែរ',
+                    'en'
+                ? 'English'
+                : 'ខ្មែរ',
             onTap: () => _showLanguageSheet(context),
           ),
 

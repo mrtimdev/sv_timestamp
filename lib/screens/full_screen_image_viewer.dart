@@ -7,7 +7,7 @@ import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:flutter/services.dart';
-import 'package:svs_timestamp/constants/app_colors.dart';
+import 'package:sv_timestamp/constants/app_colors.dart';
 import '../models/captured_image.dart';
 import '../utils/storage_service.dart';
 import 'package:provider/provider.dart';
@@ -428,7 +428,7 @@ class _FullScreenImageViewerState extends State<FullScreenImageViewer>
   String _getShareText() {
     final type = _isShowingOriginal ? 'Original' : 'Watermarked';
     return '''
-$type Image from SVS Timestamp
+$type Image from SV TimeStamp
 📅 ${_formatDate(widget.image.timestamp)} at ${_formatTime(widget.image.timestamp)}
 📍 ${widget.image.location != null ? '${widget.image.location!['latitude']!.toStringAsFixed(4)}, ${widget.image.location!['longitude']!.toStringAsFixed(4)}' : 'No location'}
 🏠 ${widget.image.address ?? 'No address'}

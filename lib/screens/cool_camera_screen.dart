@@ -16,8 +16,8 @@ import 'package:vibration/vibration.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 // Update these imports based on your actual project structure
-import 'package:svs_timestamp/l10n/app_localizations.dart';
-import 'package:svs_timestamp/models/captured_image.dart';
+import 'package:sv_timestamp/l10n/app_localizations.dart';
+import 'package:sv_timestamp/models/captured_image.dart';
 import '../utils/metadata_service.dart';
 import '../utils/storage_service.dart';
 

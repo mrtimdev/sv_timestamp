@@ -157,7 +157,7 @@ class _GalleryScreenState extends State<GalleryScreen>
 
       // Find our app's album
       for (var album in albums) {
-        if (album.name == 'SVS-Watermark-Camera') {
+        if (album.name == 'SV-Watermark-Camera') {
           _targetAlbum = album;
           break;
         }
@@ -608,7 +608,7 @@ class _GalleryScreenState extends State<GalleryScreen>
         if (Platform.isIOS) {
           await GallerySaver.saveImage(
             file.path,
-            albumName: 'SVS-Watermark-Camera',
+            albumName: 'SV-Watermark-Camera',
           );
         } else {
           // For Android, use PhotoManager

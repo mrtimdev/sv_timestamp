@@ -1,5 +1,5 @@
-name: svs_timestamp
-description: SVS TimeStamp - capture photos stamped with time, location, logo and more.
+name: sv_timestamp
+description: SV TimeStamp - capture photos stamped with time, location, logo and more.
 publish_to: "none"
 
 version: 1.0.0+1
@@ -63,9 +63,9 @@ dev_dependencies:
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
-  # image_path: "assets/sv_app_icon.png"
+  image_path: "assets/sv_app_icon.png"
   # image_path: "assets/sv_super_app_icon.png"
-  image_path: "assets/image.png"
+  # image_path: "assets/image.png"
   
   # min_sdk_android: 21
 

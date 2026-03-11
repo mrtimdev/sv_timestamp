@@ -13,11 +13,11 @@
 // import 'package:path_provider/path_provider.dart';
 // import 'package:path/path.dart' as path;
 // import 'package:shared_preferences/shared_preferences.dart';
-// import 'package:svs_timestamp/l10n/app_localizations.dart';
-// import 'package:svs_timestamp/screens/SettingsScreen.dart';
-// import 'package:svs_timestamp/screens/gallery_screen.dart';
+// import 'package:sv_timestamp/l10n/app_localizations.dart';
+// import 'package:sv_timestamp/screens/SettingsScreen.dart';
+// import 'package:sv_timestamp/screens/gallery_screen.dart';
 // import 'package:vibration/vibration.dart';
-// import 'package:svs_timestamp/models/captured_image.dart';
+// import 'package:sv_timestamp/models/captured_image.dart';
 // import '../utils/metadata_service.dart';
 // import '../utils/storage_service.dart';
 

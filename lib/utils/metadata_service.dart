@@ -171,7 +171,7 @@ class MetadataService {
       }
 
       try {
-        final ByteData data = await rootBundle.load('assets/sv_super_logo.png');
+        final ByteData data = await rootBundle.load('assets/sv_logo.png');
         final Uint8List bytes = data.buffer.asUint8List();
         final image = img.decodeImage(bytes);
         if (image != null) {

@@ -6,7 +6,7 @@ import 'package:geocoding/geocoding.dart';
 import 'dart:typed_data';
 import 'package:image/image.dart' as img;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:svs_timestamp/l10n/app_localizations.dart';
+import 'package:sv_timestamp/l10n/app_localizations.dart';
 
 class MetadataService {
   static Map<String, img.Image> _emojiCache = {};

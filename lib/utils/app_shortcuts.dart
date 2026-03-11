@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:quick_actions/quick_actions.dart';
-import 'package:svs_timestamp/screens/SettingsScreen.dart';
-import 'package:svs_timestamp/screens/camera_screen.dart';
-import 'package:svs_timestamp/screens/full_screen_image_viewer.dart';
-import 'package:svs_timestamp/utils/storage_service.dart';
+import 'package:sv_timestamp/screens/SettingsScreen.dart';
+import 'package:sv_timestamp/screens/camera_screen.dart';
+import 'package:sv_timestamp/screens/full_screen_image_viewer.dart';
+import 'package:sv_timestamp/utils/storage_service.dart';
 import 'package:provider/provider.dart';
 
 class AppShortcuts {

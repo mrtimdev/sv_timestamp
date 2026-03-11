@@ -1,4 +1,4 @@
-package com.svs.timestamp
+package com.sv.timestamp
 
 import io.flutter.embedding.android.FlutterActivity
 

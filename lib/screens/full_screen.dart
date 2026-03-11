@@ -212,7 +212,7 @@ class _FullScreenGalleryState extends State<FullScreenGallery>
         if (Platform.isIOS) {
           final result = await GallerySaver.saveImage(
             file.path,
-            albumName: 'SVS-Watermark-Camera',
+            albumName: 'SV-Watermark-Camera',
           );
           if (result == null || !result) {
             throw Exception("Failed to save to gallery");

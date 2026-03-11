@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:svs_timestamp/l10n/app_localizations.dart';
-import 'package:svs_timestamp/utils/setting_provider.dart';
-import 'package:svs_timestamp/utils/storage_service.dart';
-import 'package:svs_timestamp/widgets/setting_item.dart';
-import 'package:svs_timestamp/utils/metadata_service.dart';
+import 'package:sv_timestamp/l10n/app_localizations.dart';
+import 'package:sv_timestamp/utils/setting_provider.dart';
+import 'package:sv_timestamp/utils/storage_service.dart';
+import 'package:sv_timestamp/widgets/setting_item.dart';
+import 'package:sv_timestamp/utils/metadata_service.dart';
 import 'package:image_picker/image_picker.dart';
 
 class SettingsScreen extends StatefulWidget {
